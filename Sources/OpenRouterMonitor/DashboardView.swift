@@ -41,6 +41,14 @@ struct DashboardView: View {
                 } label: {
                     Label("Settings", systemImage: "gearshape")
                 }
+
+                Spacer()
+
+                Button(role: .destructive) {
+                    NSApplication.shared.terminate(nil)
+                } label: {
+                    Label("Quit", systemImage: "power")
+                }
             }
             .buttonStyle(.bordered)
         }

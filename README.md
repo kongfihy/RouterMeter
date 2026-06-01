@@ -94,6 +94,44 @@ swift run OpenRouterMonitor
 
 When launched through SwiftPM, the app runs as a raw executable rather than a packaged `.app` bundle. Most functionality works, but macOS notifications are skipped in this mode because `UNUserNotificationCenter` requires a real app bundle.
 
+## Create a macOS App Bundle
+
+```bash
+./scripts/package_app.sh
+```
+
+The packaged app is created at:
+
+```text
+dist/OpenRouterMonitor.app
+```
+
+The local bundle is ad-hoc signed for development use. It is not notarized.
+
+## Create an Installer DMG
+
+```bash
+./scripts/package_dmg.sh
+```
+
+The DMG is created at:
+
+```text
+dist/OpenRouterMonitor.dmg
+```
+
+The DMG contains `OpenRouterMonitor.app` and an `Applications` shortcut for drag-to-install. The app inside the DMG is ad-hoc signed for local development, not notarized.
+
+## Install From the DMG
+
+After creating the DMG:
+
+1. Open `dist/OpenRouterMonitor.dmg`.
+2. Drag `OpenRouterMonitor.app` into `Applications`.
+3. Launch it from Applications.
+
+Because the app is currently ad-hoc signed and not notarized, macOS may show a Gatekeeper warning on first launch outside this development machine.
+
 ## Checks
 
 This project includes an executable check target:
@@ -132,8 +170,8 @@ Sources/
 
 ## Current Limitations
 
-- No packaged `.app` target yet.
-- Notifications are disabled when running through `swift run`.
+- The packaged app and DMG are ad-hoc signed, not notarized.
+- Notifications are disabled only when running through `swift run`; use the packaged `.app` for bundle-dependent macOS APIs.
 - GBP conversion uses a manual exchange rate.
 - Model breakdown depends on OpenRouter management activity access.
 - No multi-key or multi-account UI yet.
@@ -143,8 +181,8 @@ Sources/
 
 Planned next steps:
 
-- Package as a distributable macOS `.app`.
-- Add proper app icon assets.
+- Add Developer ID signing and notarization.
+- Add a polished DMG background and layout.
 - Add multi-key profiles.
 - Add charts for daily and monthly usage trends.
 - Add historical model analytics views.

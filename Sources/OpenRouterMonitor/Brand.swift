@@ -19,10 +19,15 @@ enum Brand {
     }
 
     static var iconImage: NSImage? {
-        guard let url = Bundle.module.url(forResource: "OpenRouterIcon", withExtension: "png") else {
-            return nil
+        if let appURL = Bundle.main.url(forResource: "OpenRouterIcon", withExtension: "png") {
+            return NSImage(contentsOf: appURL)
         }
-        return NSImage(contentsOf: url)
+
+        if let moduleURL = Bundle.module.url(forResource: "OpenRouterIcon", withExtension: "png") {
+            return NSImage(contentsOf: moduleURL)
+        }
+
+        return nil
     }
 }
 
