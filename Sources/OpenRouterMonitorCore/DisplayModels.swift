@@ -75,7 +75,7 @@ public struct MenuBarTitleBuilder: Sendable {
             if let keyRemaining = snapshot.keyLimitRemaining {
                 return "OR \(moneyFormatter.string(fromUSDCredits: keyRemaining))"
             }
-            return "OR \(moneyFormatter.string(fromUSDCredits: snapshot.usageAllTime)) used"
+            return "OR \(moneyFormatter.string(fromUSDCredits: snapshot.usageAllTimeIncludingBYOK)) used"
         case .percentRemaining:
             if let percent = snapshot.accountPercentRemaining {
                 return "OR \((percent * 100).formatted(.number.precision(.fractionLength(0))))%"
@@ -86,7 +86,7 @@ public struct MenuBarTitleBuilder: Sendable {
             let percent = max(0, min(1, remaining / limit))
             return "OR \((percent * 100).formatted(.number.precision(.fractionLength(0))))%"
         case .todaySpend:
-            return "OR \(moneyFormatter.string(fromUSDCredits: snapshot.usageDaily)) today"
+            return "OR \(moneyFormatter.string(fromUSDCredits: snapshot.usageDailyIncludingBYOK)) today"
         }
     }
 }

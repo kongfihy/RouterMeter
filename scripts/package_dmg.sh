@@ -26,4 +26,7 @@ hdiutil create \
     -format UDZO \
     "$DMG_PATH" >/dev/null
 
+rm -rf "$APP_DIR"
+cp -R "$STAGING_DIR/$APP_NAME.app" "$APP_DIR"
+
 echo "$DMG_PATH"

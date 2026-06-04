@@ -26,6 +26,11 @@ struct CoreChecks {
         expect(creditsResponse.data.totalCredits == 100.5, "total credits decodes")
         expect(creditsResponse.data.totalUsage == 25.75, "total usage decodes")
 
+        let keysResponse = try JSONDecoder().decode(OpenRouterAPIKeysResponse.self, from: keysBody)
+        expect(keysResponse.data.count == 2, "api key list decodes")
+        expect(keysResponse.data[0].displayName == "Production Key", "api key display name")
+        expect(approximatelyEqual(keysResponse.data[0].totalUsageMonthly, 17.5), "api key monthly total includes BYOK")
+
         let activityResponse = try JSONDecoder().decode(OpenRouterActivityResponse.self, from: activityBody)
         expect(activityResponse.data.count == 2, "activity items decode")
         expect(activityResponse.data[0].model == "openai/gpt-4.1", "activity model decodes")
@@ -34,7 +39,21 @@ struct CoreChecks {
         let summaries = ModelUsageSummary.aggregate(activityItems: activityResponse.data)
         expect(summaries.count == 1, "activity aggregates by model")
         expect(summaries[0].requests == 8, "activity request totals aggregate")
-        expect(summaries[0].usage == 0.024, "activity usage totals aggregate")
+        expect(approximatelyEqual(summaries[0].usage, 0.039), "activity usage and BYOK totals aggregate")
+
+        let activityUsage = ActivityUsageSummary.aggregate(activityItems: activityResponse.data)
+        expect(approximatelyEqual(activityUsage?.latestDayUsage, 0.012), "latest day usage includes BYOK")
+        expect(approximatelyEqual(activityUsage?.last7DaysUsage, 0.039), "last 7 day usage includes BYOK")
+        expect(approximatelyEqual(activityUsage?.last30DaysByokUsage, 0.015), "last 30 day BYOK aggregate")
+        expect(activityUsage?.last30DaysRequests == 8, "last 30 day requests aggregate")
+        expect(activityUsage?.trend.count == 2, "trend groups by day")
+
+        let burnDown = CreditBurnDownSummary.make(
+            snapshot: makeSnapshot(totalCredits: 100, accountTotalUsage: 25),
+            activitySummary: activityUsage
+        )
+        expect(approximatelyEqual(burnDown?.remainingCredits, 75), "burn down remaining credits")
+        expect((burnDown?.estimatedDaysRemaining ?? 0) > 0, "burn down days remaining")
     }
 
     private static func checkCalculations() {
@@ -49,6 +68,9 @@ struct CoreChecks {
         expect(MenuBarTitleBuilder.title(snapshot: snapshot, mode: .balanceRemaining, moneyFormatter: usd) == "OR $75.00", "balance title")
         expect(MenuBarTitleBuilder.title(snapshot: snapshot, mode: .percentRemaining, moneyFormatter: usd) == "OR 75%", "percent title")
         expect(MenuBarTitleBuilder.title(snapshot: snapshot, mode: .todaySpend, moneyFormatter: usd) == "OR $1.25 today", "today title")
+
+        let byokSnapshot = makeSnapshot(usageDaily: 1.25, byokUsageDaily: 0.75)
+        expect(MenuBarTitleBuilder.title(snapshot: byokSnapshot, mode: .todaySpend, moneyFormatter: usd) == "OR $2.00 today", "today title includes BYOK")
     }
 
     private static func checkAlertEvaluator() {
@@ -91,6 +113,8 @@ struct CoreChecks {
                 return response(statusCode: 200, body: creditsBody)
             case "/activity":
                 return response(statusCode: 200, body: activityBody)
+            case "/keys":
+                return response(statusCode: 200, body: keysBody)
             default:
                 return response(statusCode: 404, body: Data())
             }
@@ -103,6 +127,9 @@ struct CoreChecks {
 
         let activity = try await client.fetchActivity(apiKey: "sk-test")
         expect(activity.count == 2, "client fetches activity")
+
+        let keys = try await client.fetchKeys(apiKey: "sk-test")
+        expect(keys.count == 2, "client fetches key list")
     }
 
     private static func checkClientHTTPFailures() async {
@@ -229,10 +256,56 @@ private let activityBody = Data("""
 }
 """.utf8)
 
+private let keysBody = Data("""
+{
+  "data": [
+    {
+      "hash": "abc123",
+      "name": "Production Key",
+      "label": "sk-or-v1-pro...123",
+      "disabled": false,
+      "limit": 100,
+      "limit_remaining": 82.5,
+      "limit_reset": "monthly",
+      "usage": 15,
+      "usage_daily": 1.5,
+      "usage_weekly": 5,
+      "usage_monthly": 15,
+      "byok_usage": 2.5,
+      "byok_usage_daily": 0.2,
+      "byok_usage_weekly": 0.8,
+      "byok_usage_monthly": 2.5,
+      "include_byok_in_limit": false,
+      "expires_at": "2027-12-31T23:59:59Z"
+    },
+    {
+      "hash": "def456",
+      "name": null,
+      "label": "sk-or-v1-dev...456",
+      "disabled": true,
+      "limit": 50,
+      "limit_remaining": 12.75,
+      "limit_reset": "monthly",
+      "usage": 33,
+      "usage_daily": 0.4,
+      "usage_weekly": 2,
+      "usage_monthly": 10,
+      "byok_usage": 0,
+      "byok_usage_daily": 0,
+      "byok_usage_weekly": 0,
+      "byok_usage_monthly": 0,
+      "include_byok_in_limit": false,
+      "expires_at": null
+    }
+  ]
+}
+""".utf8)
+
 private func makeSnapshot(
     totalCredits: Double? = 100,
     accountTotalUsage: Double? = 25,
     usageDaily: Double = 0.5,
+    byokUsageDaily: Double = 0,
     usageMonthly: Double = 10,
     keyLimit: Double? = 50,
     keyLimitRemaining: Double? = 25
@@ -247,7 +320,7 @@ private func makeSnapshot(
         usageWeekly: 4,
         usageMonthly: usageMonthly,
         byokUsageAllTime: 0,
-        byokUsageDaily: 0,
+        byokUsageDaily: byokUsageDaily,
         byokUsageWeekly: 0,
         byokUsageMonthly: 0,
         totalCredits: totalCredits,
@@ -272,6 +345,11 @@ private func expect(_ condition: @autoclosure () -> Bool, _ message: String) {
     if !condition() {
         fail(message)
     }
+}
+
+private func approximatelyEqual(_ lhs: Double?, _ rhs: Double, tolerance: Double = 0.000_001) -> Bool {
+    guard let lhs else { return false }
+    return abs(lhs - rhs) <= tolerance
 }
 
 private func fail(_ message: String) -> Never {

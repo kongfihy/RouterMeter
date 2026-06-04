@@ -3,17 +3,20 @@ import Foundation
 public struct RefreshOutcome: Equatable, Sendable {
     public let snapshot: UsageSnapshot
     public let activityItems: [OpenRouterActivityItem]
+    public let apiKeys: [OpenRouterAPIKey]
     public let optionalDataWarning: String?
     public let alertDecision: AlertDecision
 
     public init(
         snapshot: UsageSnapshot,
         activityItems: [OpenRouterActivityItem],
+        apiKeys: [OpenRouterAPIKey],
         optionalDataWarning: String?,
         alertDecision: AlertDecision
     ) {
         self.snapshot = snapshot
         self.activityItems = activityItems
+        self.apiKeys = apiKeys
         self.optionalDataWarning = optionalDataWarning
         self.alertDecision = alertDecision
     }
@@ -37,6 +40,7 @@ public final class RefreshService<Fetcher: OpenRouterFetching>: @unchecked Senda
         let keyResponse = try await fetcher.fetchKey(apiKey: apiKey)
         var creditsResponse: OpenRouterCreditsResponse?
         var activityItems: [OpenRouterActivityItem] = []
+        var apiKeys: [OpenRouterAPIKey] = []
         var warnings: [String] = []
 
         if includeCredits {
@@ -51,6 +55,12 @@ public final class RefreshService<Fetcher: OpenRouterFetching>: @unchecked Senda
             } catch {
                 warnings.append("Model activity unavailable: \(Self.message(for: error))")
             }
+
+            do {
+                apiKeys = try await fetcher.fetchKeys(apiKey: apiKey)
+            } catch {
+                warnings.append("API key list unavailable: \(Self.message(for: error))")
+            }
         }
 
         let snapshot = UsageSnapshot.make(keyResponse: keyResponse, creditsResponse: creditsResponse)
@@ -62,6 +72,7 @@ public final class RefreshService<Fetcher: OpenRouterFetching>: @unchecked Senda
         return RefreshOutcome(
             snapshot: snapshot,
             activityItems: activityItems,
+            apiKeys: apiKeys,
             optionalDataWarning: warnings.isEmpty ? nil : warnings.joined(separator: " "),
             alertDecision: alertDecision
         )

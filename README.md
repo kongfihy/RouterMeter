@@ -14,6 +14,10 @@ It is built for developers, AI power users, and small teams using OpenRouter for
 - Key usage summary from OpenRouter.
 - Optional account credit balance for management-capable keys.
 - Optional model breakdown from OpenRouter activity analytics.
+- Daily spend trend from recent OpenRouter activity.
+- BYOK-inclusive usage totals and BYOK/OpenRouter usage split.
+- Credit burn-down estimate based on remaining credits and recent spend.
+- Per-key spend overview for management-capable keys.
 - USD and GBP display, with manual USD-to-GBP conversion.
 - Budget alerts for low balance, critical balance, daily spend, and monthly spend.
 - Direct link to the OpenRouter dashboard.
@@ -29,8 +33,13 @@ The menu bar can show one of three display modes:
 The popover dashboard shows:
 
 - Current balance or key limit status
-- Today, week, month, and all-time usage
-- Top model breakdown for the last 30 completed UTC days when available
+- Today, week, month, and all-time usage when key-level data is available
+- Latest day, last 7 days, last 30 days, and request counts when activity data is available
+- Spend trend chart for recent activity
+- BYOK and OpenRouter spend split
+- Credit burn-down estimate when account credits and activity data are available
+- Per-key spend, remaining limits, disabled status, and near-expiration labels when key list access is available
+- Top model breakdown for recent activity when available
 - Connection and refresh status
 - Quick actions for refresh, dashboard, and settings
 
@@ -48,10 +57,15 @@ The app uses the following OpenRouter endpoints:
 
 - `GET /api/v1/activity`
   - Used for model-level activity grouped by model/endpoint.
+  - Also powers the spend trend, BYOK split, request totals, token totals, and burn-down average.
   - Requires a management-capable key.
-  - Covers the last 30 completed UTC days.
+  - Covers recent activity returned by OpenRouter.
 
-If a management-only endpoint returns `403 Forbidden`, the app still keeps the key-level refresh working and shows a warning for the unavailable account/model data.
+- `GET /api/v1/keys?include_disabled=true`
+  - Used for the per-key spend overview.
+  - Requires a management-capable key.
+
+If a management-only endpoint returns `403 Forbidden`, the app still keeps the key-level refresh working and shows a warning for the unavailable account, activity, or key-list data.
 
 ## Privacy And Storage
 
@@ -69,6 +83,7 @@ That file may contain:
 - Budget thresholds
 - Cached usage snapshots
 - Cached model activity returned by OpenRouter
+- Cached API key list metadata returned by OpenRouter
 - Last refresh status and warnings
 
 The app does not send data to any service other than OpenRouter.
@@ -146,10 +161,14 @@ The checks cover:
 - Balance and percent calculations
 - USD/GBP display formatting
 - Menu bar title formatting
+- BYOK-inclusive usage totals
 - Alert threshold deduping
 - Mocked key-only refresh
 - Mocked management refresh
+- API key list decoding and fetching
 - Activity decoding and model aggregation
+- Activity spend trend aggregation
+- Credit burn-down calculation
 - HTTP error mapping
 - Malformed response handling
 - Transport failure handling
@@ -174,6 +193,8 @@ Sources/
 - Notifications are disabled only when running through `swift run`; use the packaged `.app` for bundle-dependent macOS APIs.
 - GBP conversion uses a manual exchange rate.
 - Model breakdown depends on OpenRouter management activity access.
+- Spend trend, BYOK split, and burn-down widgets depend on OpenRouter activity access.
+- Per-key spend depends on OpenRouter key-list access.
 - No multi-key or multi-account UI yet.
 - No local proxy/import mode for generation-level tracing yet.
 
@@ -184,7 +205,7 @@ Planned next steps:
 - Add Developer ID signing and notarization.
 - Add a polished DMG background and layout.
 - Add multi-key profiles.
-- Add charts for daily and monthly usage trends.
+- Add monthly usage trend charts.
 - Add historical model analytics views.
 - Add export for cached usage data.
 - Add optional local proxy/import support for generation-level cost tracing.

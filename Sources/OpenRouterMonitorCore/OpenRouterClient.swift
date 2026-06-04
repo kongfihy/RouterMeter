@@ -40,6 +40,7 @@ public protocol OpenRouterFetching: Sendable {
     func fetchCredits(apiKey: String) async throws -> OpenRouterCreditsResponse
     func fetchUsageSnapshot(apiKey: String, includeCredits: Bool) async throws -> UsageSnapshot
     func fetchActivity(apiKey: String) async throws -> [OpenRouterActivityItem]
+    func fetchKeys(apiKey: String) async throws -> [OpenRouterAPIKey]
 }
 
 public final class OpenRouterClient: OpenRouterFetching, @unchecked Sendable {
@@ -84,8 +85,29 @@ public final class OpenRouterClient: OpenRouterFetching, @unchecked Sendable {
         return response.data
     }
 
-    private func get<Response: Decodable>(path: String, apiKey: String) async throws -> Response {
-        let url = baseURL.appendingPathComponent(path)
+    public func fetchKeys(apiKey: String) async throws -> [OpenRouterAPIKey] {
+        let trimmedKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedKey.isEmpty else { throw OpenRouterClientError.missingAPIKey }
+        let response: OpenRouterAPIKeysResponse = try await get(
+            path: "keys",
+            apiKey: trimmedKey,
+            queryItems: [URLQueryItem(name: "include_disabled", value: "true")]
+        )
+        return response.data
+    }
+
+    private func get<Response: Decodable>(
+        path: String,
+        apiKey: String,
+        queryItems: [URLQueryItem] = []
+    ) async throws -> Response {
+        var urlComponents = URLComponents(url: baseURL.appendingPathComponent(path), resolvingAgainstBaseURL: false)
+        if !queryItems.isEmpty {
+            urlComponents?.queryItems = queryItems
+        }
+        guard let url = urlComponents?.url else {
+            throw OpenRouterClientError.invalidResponse
+        }
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")

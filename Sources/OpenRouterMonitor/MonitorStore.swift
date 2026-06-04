@@ -51,7 +51,21 @@ struct PersistedMonitorState: Codable, Equatable {
     var profile = ApiKeyProfile()
     var snapshots: [UsageSnapshot] = []
     var activityItems: [OpenRouterActivityItem] = []
+    var apiKeys: [OpenRouterAPIKey] = []
     var capturedGenerations: [CapturedGeneration] = []
+
+    init() {}
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        configuration = try container.decodeIfPresent(AppConfiguration.self, forKey: .configuration) ?? AppConfiguration()
+        budget = try container.decodeIfPresent(BudgetSettings.self, forKey: .budget) ?? BudgetSettings()
+        profile = try container.decodeIfPresent(ApiKeyProfile.self, forKey: .profile) ?? ApiKeyProfile()
+        snapshots = try container.decodeIfPresent([UsageSnapshot].self, forKey: .snapshots) ?? []
+        activityItems = try container.decodeIfPresent([OpenRouterActivityItem].self, forKey: .activityItems) ?? []
+        apiKeys = try container.decodeIfPresent([OpenRouterAPIKey].self, forKey: .apiKeys) ?? []
+        capturedGenerations = try container.decodeIfPresent([CapturedGeneration].self, forKey: .capturedGenerations) ?? []
+    }
 }
 
 @MainActor
@@ -83,6 +97,23 @@ final class MonitorStore: ObservableObject {
 
     var topModelSummaries: [ModelUsageSummary] {
         Array(ModelUsageSummary.aggregate(activityItems: state.activityItems).prefix(5))
+    }
+
+    var activityUsageSummary: ActivityUsageSummary? {
+        ActivityUsageSummary.aggregate(activityItems: state.activityItems)
+    }
+
+    var burnDownSummary: CreditBurnDownSummary? {
+        CreditBurnDownSummary.make(snapshot: latestSnapshot, activitySummary: activityUsageSummary)
+    }
+
+    var sortedAPIKeys: [OpenRouterAPIKey] {
+        state.apiKeys.sorted {
+            if $0.totalUsageMonthly == $1.totalUsageMonthly {
+                return $0.totalUsageDaily > $1.totalUsageDaily
+            }
+            return $0.totalUsageMonthly > $1.totalUsageMonthly
+        }
     }
 
     func startAutoRefresh() {
@@ -127,6 +158,7 @@ final class MonitorStore: ObservableObject {
             state.snapshots.insert(outcome.snapshot, at: 0)
             state.snapshots = Array(state.snapshots.prefix(500))
             state.activityItems = outcome.activityItems
+            state.apiKeys = outcome.apiKeys
             state.profile.label = outcome.snapshot.keyLabel
             state.profile.hasStoredKey = true
             state.profile.lastValidatedAt = Date()
