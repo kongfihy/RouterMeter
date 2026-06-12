@@ -11,6 +11,9 @@ struct AppConfiguration: Codable, Equatable {
     var lastRefreshStatus = "Not connected"
     var lastRefreshError: String?
     var activeAlertRawValues: [String] = []
+    var trackedModelIDs: [String] = []
+    var modelPricingLastUpdatedAt: Date?
+    var modelPricingError: String?
 
     var selectedCurrency: DisplayCurrency {
         get { DisplayCurrency(rawValue: selectedCurrencyRawValue) ?? .usd }
@@ -45,6 +48,15 @@ struct CapturedGeneration: Codable, Equatable, Identifiable {
     var completionTokens: Int
 }
 
+struct TrackedModelPricingRow: Equatable, Identifiable {
+    let requestedID: String
+    let model: OpenRouterModel?
+
+    var id: String {
+        requestedID.lowercased()
+    }
+}
+
 struct PersistedMonitorState: Codable, Equatable {
     var configuration = AppConfiguration()
     var budget = BudgetSettings()
@@ -52,6 +64,7 @@ struct PersistedMonitorState: Codable, Equatable {
     var snapshots: [UsageSnapshot] = []
     var activityItems: [OpenRouterActivityItem] = []
     var apiKeys: [OpenRouterAPIKey] = []
+    var trackedModels: [OpenRouterModel] = []
     var capturedGenerations: [CapturedGeneration] = []
 
     init() {}
@@ -64,6 +77,7 @@ struct PersistedMonitorState: Codable, Equatable {
         snapshots = try container.decodeIfPresent([UsageSnapshot].self, forKey: .snapshots) ?? []
         activityItems = try container.decodeIfPresent([OpenRouterActivityItem].self, forKey: .activityItems) ?? []
         apiKeys = try container.decodeIfPresent([OpenRouterAPIKey].self, forKey: .apiKeys) ?? []
+        trackedModels = try container.decodeIfPresent([OpenRouterModel].self, forKey: .trackedModels) ?? []
         capturedGenerations = try container.decodeIfPresent([CapturedGeneration].self, forKey: .capturedGenerations) ?? []
     }
 }
@@ -72,6 +86,7 @@ struct PersistedMonitorState: Codable, Equatable {
 final class MonitorStore: ObservableObject {
     @Published var state: PersistedMonitorState
     @Published var isRefreshing = false
+    @Published var isRefreshingModelPrices = false
 
     private let keychain = KeychainStore()
     private let client = OpenRouterClient()
@@ -116,6 +131,25 @@ final class MonitorStore: ObservableObject {
         }
     }
 
+    var trackedModelPricingRows: [TrackedModelPricingRow] {
+        let modelsByKey = Dictionary(
+            state.trackedModels.flatMap { model in
+                [model.id, model.canonicalSlug ?? ""]
+                    .map(Self.normalizedModelID)
+                    .filter { !$0.isEmpty }
+                    .map { ($0, model) }
+            },
+            uniquingKeysWith: { existing, _ in existing }
+        )
+
+        return state.configuration.trackedModelIDs.map { modelID in
+            TrackedModelPricingRow(
+                requestedID: modelID,
+                model: modelsByKey[Self.normalizedModelID(modelID)]
+            )
+        }
+    }
+
     func startAutoRefresh() {
         timer?.invalidate()
         let interval = max(60, state.configuration.refreshIntervalMinutes * 60)
@@ -137,6 +171,79 @@ final class MonitorStore: ObservableObject {
             startAutoRefresh()
         } catch {
             assertionFailure("State save failed: \(error)")
+        }
+    }
+
+    func addTrackedModelID(_ modelID: String) -> Bool {
+        let trimmed = modelID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        let normalized = Self.normalizedModelID(trimmed)
+        guard !state.configuration.trackedModelIDs.contains(where: { Self.normalizedModelID($0) == normalized }) else {
+            return false
+        }
+        state.configuration.trackedModelIDs.append(trimmed)
+        state.configuration.modelPricingError = nil
+        save()
+        return true
+    }
+
+    func removeTrackedModelID(_ modelID: String) {
+        let normalized = Self.normalizedModelID(modelID)
+        state.configuration.trackedModelIDs.removeAll { Self.normalizedModelID($0) == normalized }
+        state.trackedModels.removeAll { model in
+            Self.normalizedModelID(model.id) == normalized || Self.normalizedModelID(model.canonicalSlug ?? "") == normalized
+        }
+        if state.configuration.trackedModelIDs.isEmpty {
+            state.configuration.modelPricingError = nil
+            state.configuration.modelPricingLastUpdatedAt = nil
+        }
+        save()
+    }
+
+    func refreshModelPricingIfNeeded() async {
+        guard !state.configuration.trackedModelIDs.isEmpty else { return }
+        if let lastUpdated = state.configuration.modelPricingLastUpdatedAt,
+           Date().timeIntervalSince(lastUpdated) < 3_600,
+           !state.trackedModels.isEmpty {
+            return
+        }
+        await refreshModelPricing()
+    }
+
+    func refreshModelPricing() async {
+        guard !isRefreshingModelPrices else { return }
+        guard !state.configuration.trackedModelIDs.isEmpty else {
+            state.trackedModels = []
+            state.configuration.modelPricingError = nil
+            state.configuration.modelPricingLastUpdatedAt = nil
+            save()
+            return
+        }
+
+        isRefreshingModelPrices = true
+        defer { isRefreshingModelPrices = false }
+
+        do {
+            let models = try await client.fetchModels()
+            let modelsByKey = Dictionary(
+                models.flatMap { model in
+                    [model.id, model.canonicalSlug ?? ""]
+                        .map(Self.normalizedModelID)
+                        .filter { !$0.isEmpty }
+                        .map { ($0, model) }
+                },
+                uniquingKeysWith: { existing, _ in existing }
+            )
+
+            let trackedIDs = state.configuration.trackedModelIDs
+            state.trackedModels = trackedIDs.compactMap { modelsByKey[Self.normalizedModelID($0)] }
+            let missingIDs = trackedIDs.filter { modelsByKey[Self.normalizedModelID($0)] == nil }
+            state.configuration.modelPricingLastUpdatedAt = Date()
+            state.configuration.modelPricingError = missingIDs.isEmpty ? nil : "No pricing found for: \(missingIDs.joined(separator: ", "))"
+            save()
+        } catch {
+            state.configuration.modelPricingError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            save()
         }
     }
 
@@ -247,6 +354,10 @@ final class MonitorStore: ObservableObject {
         return base
             .appendingPathComponent("OpenRouterMonitor", isDirectory: true)
             .appendingPathComponent("state.json")
+    }
+
+    private static func normalizedModelID(_ modelID: String) -> String {
+        modelID.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     }
 
     private static func loadState(from url: URL) -> PersistedMonitorState {

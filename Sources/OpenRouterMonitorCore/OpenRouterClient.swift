@@ -41,6 +41,7 @@ public protocol OpenRouterFetching: Sendable {
     func fetchUsageSnapshot(apiKey: String, includeCredits: Bool) async throws -> UsageSnapshot
     func fetchActivity(apiKey: String) async throws -> [OpenRouterActivityItem]
     func fetchKeys(apiKey: String) async throws -> [OpenRouterAPIKey]
+    func fetchModels() async throws -> [OpenRouterModel]
 }
 
 public final class OpenRouterClient: OpenRouterFetching, @unchecked Sendable {
@@ -96,9 +97,14 @@ public final class OpenRouterClient: OpenRouterFetching, @unchecked Sendable {
         return response.data
     }
 
+    public func fetchModels() async throws -> [OpenRouterModel] {
+        let response: OpenRouterModelsResponse = try await get(path: "models")
+        return response.data
+    }
+
     private func get<Response: Decodable>(
         path: String,
-        apiKey: String,
+        apiKey: String? = nil,
         queryItems: [URLQueryItem] = []
     ) async throws -> Response {
         var urlComponents = URLComponents(url: baseURL.appendingPathComponent(path), resolvingAgainstBaseURL: false)
@@ -110,7 +116,9 @@ public final class OpenRouterClient: OpenRouterFetching, @unchecked Sendable {
         }
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
-        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        if let apiKey, !apiKey.isEmpty {
+            request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        }
         request.setValue("application/json", forHTTPHeaderField: "Accept")
 
         let data: Data

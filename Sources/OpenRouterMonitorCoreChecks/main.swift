@@ -9,6 +9,7 @@ struct CoreChecks {
         checkAlertEvaluator()
         try await checkClientKeyOnlySnapshot()
         try await checkClientManagementCreditsSnapshot()
+        try await checkClientModels()
         await checkClientHTTPFailures()
         await checkMalformedResponse()
         await checkTransportFailure()
@@ -30,6 +31,13 @@ struct CoreChecks {
         expect(keysResponse.data.count == 2, "api key list decodes")
         expect(keysResponse.data[0].displayName == "Production Key", "api key display name")
         expect(approximatelyEqual(keysResponse.data[0].totalUsageMonthly, 17.5), "api key monthly total includes BYOK")
+
+        let modelsResponse = try JSONDecoder().decode(OpenRouterModelsResponse.self, from: modelsBody)
+        expect(modelsResponse.data.count == 2, "model list decodes")
+        expect(modelsResponse.data[0].id == "openai/gpt-4.1", "model id decodes")
+        expect(modelsResponse.data[0].name == "GPT-4.1", "model name decodes")
+        expect(approximatelyEqual(modelsResponse.data[0].pricing.promptPricePerMillion, 2), "prompt price normalizes per million")
+        expect(approximatelyEqual(modelsResponse.data[0].pricing.completionPricePerMillion, 8), "completion price normalizes per million")
 
         let activityResponse = try JSONDecoder().decode(OpenRouterActivityResponse.self, from: activityBody)
         expect(activityResponse.data.count == 2, "activity items decode")
@@ -130,6 +138,18 @@ struct CoreChecks {
 
         let keys = try await client.fetchKeys(apiKey: "sk-test")
         expect(keys.count == 2, "client fetches key list")
+    }
+
+    private static func checkClientModels() async throws {
+        let client = OpenRouterClient(baseURL: URL(string: "https://example.test")!, urlSession: makeSession { request in
+            expect(request.url?.path == "/models", "models endpoint requested")
+            expect(request.value(forHTTPHeaderField: "Authorization") == nil, "models request does not require auth header")
+            return response(statusCode: 200, body: modelsBody)
+        })
+
+        let models = try await client.fetchModels()
+        expect(models.count == 2, "client fetches model list")
+        expect(models[1].canonicalSlug == "anthropic/claude-sonnet-4-20250514", "client decodes canonical slug")
     }
 
     private static func checkClientHTTPFailures() async {
@@ -296,6 +316,38 @@ private let keysBody = Data("""
       "byok_usage_monthly": 0,
       "include_byok_in_limit": false,
       "expires_at": null
+    }
+  ]
+}
+""".utf8)
+
+private let modelsBody = Data("""
+{
+  "data": [
+    {
+      "id": "openai/gpt-4.1",
+      "canonical_slug": "openai/gpt-4.1-2025-04-14",
+      "name": "GPT-4.1",
+      "description": "A flagship OpenAI model.",
+      "context_length": 1047576,
+      "pricing": {
+        "prompt": "0.000002",
+        "completion": "0.000008",
+        "image": "0",
+        "request": "0"
+      }
+    },
+    {
+      "id": "anthropic/claude-sonnet-4",
+      "canonical_slug": "anthropic/claude-sonnet-4-20250514",
+      "name": "Claude Sonnet 4",
+      "description": "A balanced Anthropic model.",
+      "context_length": 200000,
+      "pricing": {
+        "prompt": "0.000003",
+        "completion": "0.000015",
+        "input_cache_read": "0.0000003"
+      }
     }
   ]
 }

@@ -2,16 +2,37 @@ import AppKit
 import SwiftUI
 
 enum Brand {
-    static let accent = Color(red: 0.29, green: 0.63, blue: 1.0)
-    static let accentSecondary = Color(red: 0.18, green: 0.86, blue: 0.75)
-    static let panelFill = Color(red: 0.08, green: 0.10, blue: 0.13).opacity(0.72)
-    static let panelStroke = Color.white.opacity(0.10)
+    static let accent = Color(red: 0.18, green: 0.58, blue: 1.0)
+    static let accentSecondary = Color(red: 0.18, green: 0.84, blue: 0.62)
+    static let warning = Color(red: 1.0, green: 0.68, blue: 0.24)
+    static let danger = Color(red: 1.0, green: 0.32, blue: 0.36)
+    static let panelStroke = Color.primary.opacity(0.10)
+    static let elevatedFill = Color.primary.opacity(0.045)
+
+    static var windowBackground: LinearGradient {
+        LinearGradient(
+            colors: [
+                Color(nsColor: .windowBackgroundColor),
+                Color(nsColor: .underPageBackgroundColor)
+            ],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+    }
+
+    static var actionGradient: LinearGradient {
+        LinearGradient(
+            colors: [accent, accentSecondary],
+            startPoint: .leading,
+            endPoint: .trailing
+        )
+    }
 
     static var panelGradient: LinearGradient {
         LinearGradient(
             colors: [
-                Color(red: 0.12, green: 0.16, blue: 0.21).opacity(0.82),
-                Color(red: 0.07, green: 0.09, blue: 0.12).opacity(0.78)
+                Color.primary.opacity(0.060),
+                Color.primary.opacity(0.025)
             ],
             startPoint: .topLeading,
             endPoint: .bottomTrailing
@@ -59,18 +80,39 @@ struct BrandIcon: View {
 }
 
 struct BrandedPanel: ViewModifier {
+    let cornerRadius: CGFloat
+
+    init(cornerRadius: CGFloat = 18) {
+        self.cornerRadius = cornerRadius
+    }
+
     func body(content: Content) -> some View {
-        content
-            .background(Brand.panelGradient, in: RoundedRectangle(cornerRadius: 8))
-            .overlay(
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(Brand.panelStroke, lineWidth: 1)
-            )
+        if #available(macOS 26.0, *) {
+            content
+                .glassEffect(.regular, in: .rect(cornerRadius: cornerRadius))
+                .overlay(
+                    RoundedRectangle(cornerRadius: cornerRadius)
+                        .stroke(Brand.panelStroke, lineWidth: 1)
+                )
+                .shadow(color: .black.opacity(0.14), radius: 18, x: 0, y: 10)
+        } else {
+            content
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: cornerRadius))
+                .overlay(
+                    RoundedRectangle(cornerRadius: cornerRadius)
+                        .fill(Brand.panelGradient)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: cornerRadius)
+                        .stroke(Brand.panelStroke, lineWidth: 1)
+                )
+                .shadow(color: .black.opacity(0.12), radius: 18, x: 0, y: 10)
+        }
     }
 }
 
 extension View {
-    func brandedPanel() -> some View {
-        modifier(BrandedPanel())
+    func brandedPanel(cornerRadius: CGFloat = 18) -> some View {
+        modifier(BrandedPanel(cornerRadius: cornerRadius))
     }
 }

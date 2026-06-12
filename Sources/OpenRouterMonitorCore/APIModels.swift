@@ -185,6 +185,95 @@ public struct OpenRouterAPIKey: Codable, Equatable, Identifiable, Sendable {
     }
 }
 
+public struct OpenRouterModelsResponse: Codable, Equatable, Sendable {
+    public let data: [OpenRouterModel]
+
+    public init(data: [OpenRouterModel]) {
+        self.data = data
+    }
+}
+
+public struct OpenRouterModel: Codable, Equatable, Identifiable, Sendable {
+    public let id: String
+    public let canonicalSlug: String?
+    public let name: String
+    public let description: String?
+    public let contextLength: Int?
+    public let pricing: OpenRouterModelPricing
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case canonicalSlug = "canonical_slug"
+        case name
+        case description
+        case contextLength = "context_length"
+        case pricing
+    }
+
+    public init(
+        id: String,
+        canonicalSlug: String?,
+        name: String,
+        description: String?,
+        contextLength: Int?,
+        pricing: OpenRouterModelPricing
+    ) {
+        self.id = id
+        self.canonicalSlug = canonicalSlug
+        self.name = name
+        self.description = description
+        self.contextLength = contextLength
+        self.pricing = pricing
+    }
+}
+
+public struct OpenRouterModelPricing: Codable, Equatable, Sendable {
+    public let prompt: String?
+    public let completion: String?
+    public let request: String?
+    public let image: String?
+    public let inputCacheRead: String?
+
+    enum CodingKeys: String, CodingKey {
+        case prompt
+        case completion
+        case request
+        case image
+        case inputCacheRead = "input_cache_read"
+    }
+
+    public init(
+        prompt: String?,
+        completion: String?,
+        request: String?,
+        image: String?,
+        inputCacheRead: String?
+    ) {
+        self.prompt = prompt
+        self.completion = completion
+        self.request = request
+        self.image = image
+        self.inputCacheRead = inputCacheRead
+    }
+
+    public var promptPricePerMillion: Double? {
+        pricePerMillion(prompt)
+    }
+
+    public var completionPricePerMillion: Double? {
+        pricePerMillion(completion)
+    }
+
+    public var cacheReadPricePerMillion: Double? {
+        pricePerMillion(inputCacheRead)
+    }
+
+    private func pricePerMillion(_ value: String?) -> Double? {
+        guard let value, let price = Double(value) else { return nil }
+        return price * 1_000_000
+    }
+}
+
 public struct OpenRouterActivityResponse: Codable, Equatable, Sendable {
     public let data: [OpenRouterActivityItem]
 
