@@ -23,6 +23,8 @@ public struct OpenRouterKeyData: Codable, Equatable, Sendable {
     public let byokUsageWeekly: Double
     public let byokUsageMonthly: Double
     public let isFreeTier: Bool
+    public let isManagementKey: Bool?
+    public let expiresAt: String?
 
     enum CodingKeys: String, CodingKey {
         case label
@@ -39,6 +41,8 @@ public struct OpenRouterKeyData: Codable, Equatable, Sendable {
         case byokUsageWeekly = "byok_usage_weekly"
         case byokUsageMonthly = "byok_usage_monthly"
         case isFreeTier = "is_free_tier"
+        case isManagementKey = "is_management_key"
+        case expiresAt = "expires_at"
     }
 
     public init(
@@ -55,7 +59,9 @@ public struct OpenRouterKeyData: Codable, Equatable, Sendable {
         byokUsageDaily: Double,
         byokUsageWeekly: Double,
         byokUsageMonthly: Double,
-        isFreeTier: Bool
+        isFreeTier: Bool,
+        isManagementKey: Bool? = nil,
+        expiresAt: String? = nil
     ) {
         self.label = label
         self.limit = limit
@@ -71,6 +77,8 @@ public struct OpenRouterKeyData: Codable, Equatable, Sendable {
         self.byokUsageWeekly = byokUsageWeekly
         self.byokUsageMonthly = byokUsageMonthly
         self.isFreeTier = isFreeTier
+        self.isManagementKey = isManagementKey
+        self.expiresAt = expiresAt
     }
 }
 
@@ -200,6 +208,8 @@ public struct OpenRouterModel: Codable, Equatable, Identifiable, Sendable {
     public let description: String?
     public let contextLength: Int?
     public let pricing: OpenRouterModelPricing
+    public let created: Int?
+    public let expirationDate: String?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -208,6 +218,8 @@ public struct OpenRouterModel: Codable, Equatable, Identifiable, Sendable {
         case description
         case contextLength = "context_length"
         case pricing
+        case created
+        case expirationDate = "expiration_date"
     }
 
     public init(
@@ -216,7 +228,9 @@ public struct OpenRouterModel: Codable, Equatable, Identifiable, Sendable {
         name: String,
         description: String?,
         contextLength: Int?,
-        pricing: OpenRouterModelPricing
+        pricing: OpenRouterModelPricing,
+        created: Int? = nil,
+        expirationDate: String? = nil
     ) {
         self.id = id
         self.canonicalSlug = canonicalSlug
@@ -224,6 +238,8 @@ public struct OpenRouterModel: Codable, Equatable, Identifiable, Sendable {
         self.description = description
         self.contextLength = contextLength
         self.pricing = pricing
+        self.created = created
+        self.expirationDate = expirationDate
     }
 }
 
@@ -647,6 +663,14 @@ public extension OpenRouterAPIKey {
     }
 }
 
+public extension OpenRouterModel {
+    var expirationDateValue: Date? {
+        guard let expirationDate else { return nil }
+        return ISO8601DateFormatter().date(from: expirationDate)
+            ?? DateFormatter.openRouterActivityDay.date(from: String(expirationDate.prefix(10)))
+    }
+}
+
 private extension Calendar {
     static var utc: Calendar {
         var calendar = Calendar(identifier: .gregorian)
@@ -681,6 +705,8 @@ public struct UsageSnapshot: Codable, Equatable, Sendable {
     public let byokUsageMonthly: Double
     public let totalCredits: Double?
     public let accountTotalUsage: Double?
+    public let keyLimitReset: String?
+    public let keyExpiresAt: String?
 
     public init(
         capturedAt: Date,
@@ -696,7 +722,9 @@ public struct UsageSnapshot: Codable, Equatable, Sendable {
         byokUsageWeekly: Double,
         byokUsageMonthly: Double,
         totalCredits: Double?,
-        accountTotalUsage: Double?
+        accountTotalUsage: Double?,
+        keyLimitReset: String? = nil,
+        keyExpiresAt: String? = nil
     ) {
         self.capturedAt = capturedAt
         self.keyLabel = keyLabel
@@ -712,6 +740,8 @@ public struct UsageSnapshot: Codable, Equatable, Sendable {
         self.byokUsageMonthly = byokUsageMonthly
         self.totalCredits = totalCredits
         self.accountTotalUsage = accountTotalUsage
+        self.keyLimitReset = keyLimitReset
+        self.keyExpiresAt = keyExpiresAt
     }
 
     public var accountRemainingCredits: Double? {
@@ -740,6 +770,12 @@ public struct UsageSnapshot: Codable, Equatable, Sendable {
         usageMonthly + byokUsageMonthly
     }
 
+    public var keyExpirationDate: Date? {
+        guard let keyExpiresAt else { return nil }
+        return ISO8601DateFormatter().date(from: keyExpiresAt)
+            ?? DateFormatter.openRouterActivityDay.date(from: String(keyExpiresAt.prefix(10)))
+    }
+
     public static func make(
         keyResponse: OpenRouterKeyResponse,
         creditsResponse: OpenRouterCreditsResponse?,
@@ -759,7 +795,9 @@ public struct UsageSnapshot: Codable, Equatable, Sendable {
             byokUsageWeekly: keyResponse.data.byokUsageWeekly,
             byokUsageMonthly: keyResponse.data.byokUsageMonthly,
             totalCredits: creditsResponse?.data.totalCredits,
-            accountTotalUsage: creditsResponse?.data.totalUsage
+            accountTotalUsage: creditsResponse?.data.totalUsage,
+            keyLimitReset: keyResponse.data.limitReset,
+            keyExpiresAt: keyResponse.data.expiresAt
         )
     }
 }

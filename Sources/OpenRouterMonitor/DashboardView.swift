@@ -16,21 +16,30 @@ struct DashboardView: View {
                 await store.refresh()
             }
 
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    switch selectedSection {
-                    case .overview:
-                        OverviewSection()
-                    case .models:
-                        ModelsSection()
-                    case .activity:
-                        ActivitySection()
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 16) {
+                        Color.clear
+                            .frame(height: 0)
+                            .id("dashboard-top")
+
+                        switch selectedSection {
+                        case .overview:
+                            OverviewSection()
+                        case .models:
+                            ModelsSection()
+                        case .activity:
+                            ActivitySection()
+                        }
                     }
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 18)
                 }
-                .padding(.horizontal, 20)
-                .padding(.vertical, 18)
+                .scrollIndicators(.visible)
+                .onChange(of: selectedSection) { _, _ in
+                    proxy.scrollTo("dashboard-top", anchor: .top)
+                }
             }
-            .scrollIndicators(.visible)
         }
         .frame(width: 668, height: 732)
         .background(DashboardBackground())
@@ -99,6 +108,11 @@ private struct OverviewSection: View {
                 budget: store.state.budget,
                 formatter: store.moneyFormatter
             )
+
+            SpendForecastView(
+                summary: store.spendForecastSummary,
+                formatter: store.moneyFormatter
+            )
         }
     }
 }
@@ -128,6 +142,12 @@ private struct ModelsSection: View {
             ) {
                 await store.refreshModelPricing()
             }
+
+            ModelWatchView(
+                trackedCount: store.state.configuration.trackedModelIDs.count,
+                changes: store.recentModelCatalogChanges,
+                formatter: store.moneyFormatter
+            )
         }
     }
 }
@@ -152,6 +172,12 @@ private struct ActivitySection: View {
 
                 BurnDownView(summary: store.burnDownSummary, formatter: store.moneyFormatter)
             }
+
+            KeyHealthView(
+                summary: store.keyHealthSummary,
+                warning: store.state.configuration.lastRefreshError,
+                formatter: store.moneyFormatter
+            )
 
             APIKeysOverviewView(
                 keys: store.sortedAPIKeys,

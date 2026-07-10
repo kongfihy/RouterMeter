@@ -7,6 +7,7 @@ struct CoreChecks {
         try checkAPIDecoding()
         checkCalculations()
         checkAlertEvaluator()
+        checkIntelligenceModels()
         try await checkClientKeyOnlySnapshot()
         try await checkClientManagementCreditsSnapshot()
         try await checkClientModels()
@@ -22,6 +23,7 @@ struct CoreChecks {
         expect(keyResponse.data.limit == 50, "key limit decodes")
         expect(keyResponse.data.limitRemaining == 37.5, "key remaining decodes")
         expect(keyResponse.data.usageDaily == 0.86, "daily usage decodes")
+        expect(keyResponse.data.expiresAt == "2027-12-31T23:59:59Z", "current key expiry decodes")
 
         let creditsResponse = try JSONDecoder().decode(OpenRouterCreditsResponse.self, from: creditsBody)
         expect(creditsResponse.data.totalCredits == 100.5, "total credits decodes")
@@ -38,6 +40,7 @@ struct CoreChecks {
         expect(modelsResponse.data[0].name == "GPT-4.1", "model name decodes")
         expect(approximatelyEqual(modelsResponse.data[0].pricing.promptPricePerMillion, 2), "prompt price normalizes per million")
         expect(approximatelyEqual(modelsResponse.data[0].pricing.completionPricePerMillion, 8), "completion price normalizes per million")
+        expect(modelsResponse.data[0].expirationDate == "2028-01-01T00:00:00Z", "model expiration decodes")
 
         let activityResponse = try JSONDecoder().decode(OpenRouterActivityResponse.self, from: activityBody)
         expect(activityResponse.data.count == 2, "activity items decode")
@@ -98,6 +101,127 @@ struct CoreChecks {
             previouslyActive: []
         )
         expect(critical.newAlerts == [.criticalBalance], "critical balance suppresses low balance")
+    }
+
+    private static func checkIntelligenceModels() {
+        let calendar = utcCalendar
+        let now = makeDate("2026-07-10T12:00:00Z")
+        let trend = (0..<14).map { offset -> ActivityDaySummary in
+            let date = calendar.date(byAdding: .day, value: offset - 13, to: now)!
+            let usage = offset < 7 ? 1.0 : 2.0
+            return ActivityDaySummary(
+                date: date,
+                openRouterUsage: usage,
+                byokUsage: 0,
+                requests: 10,
+                totalTokens: 1_000
+            )
+        }
+        let activity = ActivityUsageSummary(
+            trend: trend,
+            latestDate: trend.last?.date,
+            latestDayUsage: 2,
+            latestDayByokUsage: 0,
+            last7DaysUsage: 14,
+            last7DaysByokUsage: 0,
+            last7WindowDays: 7,
+            last30DaysUsage: 21,
+            last30DaysByokUsage: 0,
+            last30WindowDays: 30,
+            last30DaysRequests: 140,
+            last30DaysTokens: 14_000
+        )
+        let forecast = SpendForecastSummary.make(
+            snapshot: makeSnapshot(usageMonthly: 10),
+            activitySummary: activity,
+            monthlyBudget: 30,
+            now: now
+        )
+        expect(approximatelyEqual(forecast?.monthToDateSpend, 17), "forecast uses the richer month-to-date source")
+        expect((forecast?.projectedMonthEndSpend ?? 0) > 30, "forecast projects remaining month")
+        expect(approximatelyEqual(forecast?.paceChangeRatio, 1), "forecast compares consecutive weeks")
+        expect(forecast?.isSpendSpike == true, "forecast flags material spend spike")
+
+        let previousModel = OpenRouterModel(
+            id: "openai/gpt-4.1",
+            canonicalSlug: nil,
+            name: "GPT-4.1",
+            description: nil,
+            contextLength: 100_000,
+            pricing: OpenRouterModelPricing(
+                prompt: "0.000002",
+                completion: "0.000008",
+                request: nil,
+                image: nil,
+                inputCacheRead: nil
+            )
+        )
+        let currentModel = OpenRouterModel(
+            id: "openai/gpt-4.1",
+            canonicalSlug: nil,
+            name: "GPT-4.1",
+            description: nil,
+            contextLength: 200_000,
+            pricing: OpenRouterModelPricing(
+                prompt: "0.000003",
+                completion: "0.000008",
+                request: nil,
+                image: nil,
+                inputCacheRead: nil
+            ),
+            expirationDate: "2027-01-01T00:00:00Z"
+        )
+        let modelChanges = ModelCatalogChangeDetector.detect(
+            previous: [previousModel],
+            current: [currentModel],
+            trackedModelIDs: [previousModel.id],
+            detectedAt: now
+        )
+        expect(modelChanges.map(\.kind).contains(.priceIncreased), "model watch detects price increase")
+        expect(modelChanges.map(\.kind).contains(.contextChanged), "model watch detects context change")
+        expect(modelChanges.map(\.kind).contains(.expirationScheduled), "model watch detects scheduled expiration")
+        let unavailable = ModelCatalogChangeDetector.detect(
+            previous: [previousModel],
+            current: [],
+            trackedModelIDs: [previousModel.id],
+            detectedAt: now
+        )
+        expect(unavailable.first?.kind == .unavailable, "model watch detects catalog removal")
+
+        let expiringSnapshot = makeSnapshot(
+            keyLimit: 100,
+            keyLimitRemaining: 5,
+            keyLimitReset: "monthly",
+            keyExpiresAt: "2026-07-17T12:00:00Z"
+        )
+        let disabledKey = OpenRouterAPIKey(
+            hash: "disabled",
+            name: "Disabled",
+            label: "disabled",
+            disabled: true,
+            limit: 10,
+            limitRemaining: 10,
+            limitReset: nil,
+            usage: 0,
+            usageDaily: 0,
+            usageWeekly: 0,
+            usageMonthly: 0,
+            byokUsage: 0,
+            byokUsageDaily: 0,
+            byokUsageWeekly: 0,
+            byokUsageMonthly: 0,
+            includeBYOKInLimit: false,
+            expiresAt: nil
+        )
+        let keyHealth = KeyHealthSummary.make(
+            snapshot: expiringSnapshot,
+            apiKeys: [disabledKey],
+            expiryWarningDays: 14,
+            now: now
+        )
+        expect(keyHealth.issues.map(\.kind).contains(.expiringSoon), "key health detects upcoming expiry")
+        expect(keyHealth.issues.map(\.kind).contains(.nearLimit), "key health detects near limit")
+        expect(keyHealth.disabledKeys == 1, "key health counts disabled keys")
     }
 
     private static func checkClientKeyOnlySnapshot() async throws {
@@ -229,7 +353,9 @@ private let keyBody = Data("""
     "byok_usage_daily": 0,
     "byok_usage_weekly": 0,
     "byok_usage_monthly": 0,
-    "is_free_tier": false
+    "is_free_tier": false,
+    "is_management_key": false,
+    "expires_at": "2027-12-31T23:59:59Z"
   }
 }
 """.utf8)
@@ -330,6 +456,8 @@ private let modelsBody = Data("""
       "name": "GPT-4.1",
       "description": "A flagship OpenAI model.",
       "context_length": 1047576,
+      "created": 1747000000,
+      "expiration_date": "2028-01-01T00:00:00Z",
       "pricing": {
         "prompt": "0.000002",
         "completion": "0.000008",
@@ -360,7 +488,9 @@ private func makeSnapshot(
     byokUsageDaily: Double = 0,
     usageMonthly: Double = 10,
     keyLimit: Double? = 50,
-    keyLimitRemaining: Double? = 25
+    keyLimitRemaining: Double? = 25,
+    keyLimitReset: String? = nil,
+    keyExpiresAt: String? = nil
 ) -> UsageSnapshot {
     UsageSnapshot(
         capturedAt: Date(timeIntervalSince1970: 0),
@@ -376,8 +506,20 @@ private func makeSnapshot(
         byokUsageWeekly: 0,
         byokUsageMonthly: 0,
         totalCredits: totalCredits,
-        accountTotalUsage: accountTotalUsage
+        accountTotalUsage: accountTotalUsage,
+        keyLimitReset: keyLimitReset,
+        keyExpiresAt: keyExpiresAt
     )
+}
+
+private var utcCalendar: Calendar {
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+    return calendar
+}
+
+private func makeDate(_ value: String) -> Date {
+    ISO8601DateFormatter().date(from: value)!
 }
 
 private func makeSession(handler: @escaping @Sendable (URLRequest) throws -> (HTTPURLResponse, Data)) -> URLSession {

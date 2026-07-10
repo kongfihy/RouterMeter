@@ -18,11 +18,14 @@ It is built for developers, AI power users, and small teams using OpenRouter for
 - Optional account credit balance for management-capable keys.
 - Optional model breakdown from OpenRouter activity analytics.
 - Interactive 30-day spend chart with dates, BYOK comparison, hover selection, token totals, and request totals.
+- Smart month-end spend forecasting with recent daily pace, monthly-budget projection, and unusual-spend alerts.
 - BYOK-inclusive usage totals and BYOK/OpenRouter usage split.
 - Credit burn-down estimate based on remaining credits and recent spend.
 - Per-key spend overview for management-capable keys.
 - Tracked model pricing view for comparing current OpenRouter input and output rates.
 - Searchable OpenRouter model catalog and one-click price tracking from model activity.
+- Tracked-model monitoring for price, context, scheduled expiry, and catalog availability changes.
+- API-key health monitoring for approaching expiry, near-limit keys, disabled-key counts, and reset cadence.
 - Optional launch-at-login setting.
 - USD and GBP display, with manual USD-to-GBP conversion.
 - Configurable notifications for budget thresholds and refresh failures, with a test action.
@@ -40,6 +43,7 @@ It is built for developers, AI power users, and small teams using OpenRouter for
 - Added persistent budget labels, currency units, and inline validation feedback.
 - Added searchable model discovery and one-click price tracking directly from model activity.
 - Added individual notification controls, refresh-failure deduplication, permission status, and a test-notification action.
+- Added individual controls for unusual spend pace, tracked-model changes, and key expiry or limit notifications.
 - Added JSON export for cached settings and usage snapshots without exporting API keys.
 - Replaced refractive Liquid Glass content cards with stable semantic macOS surfaces, removing reflected navigation, colour bleeding, and position-dependent tint changes.
 - Reduced panel borders and shadows and removed the coloured dashboard background wash for cleaner visual hierarchy.
@@ -59,6 +63,7 @@ The popover dashboard is divided into three sections.
 - Current balance or key limit status
 - Today, week, month, and all-time usage when key-level data is available
 - Remaining-credit percentage and budget health
+- Projected month-end spend, current-month spend, recent daily pace, and expected budget variance
 
 ### Models
 
@@ -66,6 +71,7 @@ The popover dashboard is divided into three sections.
 - Request, token, cost, and usage-share summaries
 - One-click tracking for models seen in recent activity
 - Current input, output, and context pricing for user-tracked model IDs
+- Change history for tracked-model pricing, context length, expiry, and availability
 
 ### Activity
 
@@ -73,6 +79,7 @@ The popover dashboard is divided into three sections.
 - Interactive 30-day spend trend with visible date labels and BYOK comparison
 - BYOK and OpenRouter spend split
 - Credit burn-down estimate when account credits and activity data are available
+- Key-health summary covering expiry, remaining limits, disabled keys, and reset cadence
 - Per-key spend, remaining limits, disabled status, and near-expiration labels when key list access is available
 
 Across the dashboard, the app also shows:
@@ -80,7 +87,7 @@ Across the dashboard, the app also shows:
 - Connection and refresh status
 - Quick actions for refresh, OpenRouter activity, and settings
 
-The separate Settings window includes API-key management, startup behavior, refresh interval, menu-bar display, tracked models, budgets, currency conversion, notification controls, connection details, and JSON export.
+The separate Settings window includes API-key management, startup behavior, refresh interval, menu-bar display, tracked models, model-change history, budgets, currency conversion, intelligence notification controls, key-expiry warning range, connection details, and JSON export.
 
 ## API Access
 
@@ -105,7 +112,7 @@ The app uses the following OpenRouter endpoints:
   - Requires a management-capable key.
 
 - `GET /api/v1/models`
-  - Used for current model pricing in the tracked pricing view.
+  - Used for current model pricing, context, expiry, and availability in the tracked pricing and Model Watch views.
   - Works without a saved API key in the app.
 
 If a management-only endpoint returns `403 Forbidden`, the app still keeps the key-level refresh working and shows a warning for the unavailable account, activity, or key-list data.
@@ -255,6 +262,9 @@ The checks cover:
 - Activity decoding and model aggregation
 - Activity spend trend aggregation
 - Credit burn-down calculation
+- Month-end spend forecasting and week-over-week pace detection
+- Tracked-model price, context, expiry, and availability change detection
+- API-key expiry and near-limit health evaluation
 - HTTP error mapping
 - Malformed response handling
 - Transport failure handling
@@ -280,7 +290,9 @@ Sources/
 - GBP conversion uses a manual exchange rate.
 - Model breakdown depends on OpenRouter management activity access.
 - Spend trend, BYOK split, and burn-down widgets depend on OpenRouter activity access.
+- Smart forecasting and unusual-spend detection depend on OpenRouter activity access.
 - Per-key spend depends on OpenRouter key-list access.
+- Model Watch detects changes when the tracked-model catalog is refreshed; it does not poll continuously while the app is closed.
 - No multi-key or multi-account UI yet.
 - No local proxy/import mode for generation-level tracing yet.
 

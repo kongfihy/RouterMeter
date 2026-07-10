@@ -264,6 +264,27 @@ struct SettingsView: View {
                         .foregroundStyle(Brand.warning)
                         .fixedSize(horizontal: false, vertical: true)
                 }
+
+                if !store.state.modelCatalogChanges.isEmpty {
+                    Divider()
+
+                    HStack {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Model change history")
+                                .font(.callout.weight(.semibold))
+                            Text("\(store.state.modelCatalogChanges.count) detected change\(store.state.modelCatalogChanges.count == 1 ? "" : "s") stored locally.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        Spacer()
+
+                        Button("Clear History", systemImage: "trash", role: .destructive) {
+                            store.clearModelChangeHistory()
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                }
             }
         }
     }
@@ -331,11 +352,14 @@ struct SettingsView: View {
                         Toggle("Low balance", isOn: $store.state.configuration.lowBalanceAlertEnabled)
                         Toggle("Critical balance", isOn: $store.state.configuration.criticalBalanceAlertEnabled)
                         Toggle("Daily budget", isOn: $store.state.configuration.dailyBudgetAlertEnabled)
+                        Toggle("Monthly budget", isOn: $store.state.configuration.monthlyBudgetAlertEnabled)
                     }
 
                     VStack(alignment: .leading, spacing: 10) {
-                        Toggle("Monthly budget", isOn: $store.state.configuration.monthlyBudgetAlertEnabled)
                         Toggle("Refresh failures", isOn: $store.state.configuration.failureNotificationsEnabled)
+                        Toggle("Unusual spend pace", isOn: $store.state.configuration.spendPaceNotificationsEnabled)
+                        Toggle("Tracked model changes", isOn: $store.state.configuration.modelChangeNotificationsEnabled)
+                        Toggle("Key expiry and limits", isOn: $store.state.configuration.keyHealthNotificationsEnabled)
                     }
                 }
                 .onChange(of: store.state.configuration.lowBalanceAlertEnabled) { _, _ in store.save() }
@@ -343,6 +367,18 @@ struct SettingsView: View {
                 .onChange(of: store.state.configuration.dailyBudgetAlertEnabled) { _, _ in store.save() }
                 .onChange(of: store.state.configuration.monthlyBudgetAlertEnabled) { _, _ in store.save() }
                 .onChange(of: store.state.configuration.failureNotificationsEnabled) { _, _ in store.save() }
+                .onChange(of: store.state.configuration.spendPaceNotificationsEnabled) { _, _ in store.save() }
+                .onChange(of: store.state.configuration.modelChangeNotificationsEnabled) { _, _ in store.save() }
+                .onChange(of: store.state.configuration.keyHealthNotificationsEnabled) { _, _ in store.save() }
+
+                LabeledContent("Key expiry warning") {
+                    Stepper(
+                        "\(store.state.configuration.keyExpiryWarningDays) days",
+                        value: $store.state.configuration.keyExpiryWarningDays,
+                        in: 1...90
+                    )
+                    .onChange(of: store.state.configuration.keyExpiryWarningDays) { _, _ in store.save() }
+                }
 
                 Divider()
 
@@ -381,6 +417,20 @@ struct SettingsView: View {
                 SettingsStatusRow(
                     label: "Analytics",
                     value: store.state.profile.isManagementKey ? "Account + activity" : "Key-level"
+                )
+                SettingsStatusRow(
+                    label: "Smart forecast",
+                    value: store.spendForecastSummary == nil ? "Building baseline" : "Available"
+                )
+                SettingsStatusRow(
+                    label: "Model watch",
+                    value: "\(store.state.configuration.trackedModelIDs.count) tracked"
+                )
+                SettingsStatusRow(
+                    label: "Key health",
+                    value: store.keyHealthSummary.issues.isEmpty
+                        ? "All clear"
+                        : "\(store.keyHealthSummary.issues.count) issue\(store.keyHealthSummary.issues.count == 1 ? "" : "s")"
                 )
 
                 if let lastValidatedAt = store.state.profile.lastValidatedAt {

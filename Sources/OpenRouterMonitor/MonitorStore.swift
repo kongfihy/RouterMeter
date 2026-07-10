@@ -19,6 +19,12 @@ struct AppConfiguration: Codable, Equatable {
     var dailyBudgetAlertEnabledOverride: Bool?
     var monthlyBudgetAlertEnabledOverride: Bool?
     var failureNotificationsEnabledOverride: Bool?
+    var spendPaceNotificationsEnabledOverride: Bool?
+    var modelChangeNotificationsEnabledOverride: Bool?
+    var keyHealthNotificationsEnabledOverride: Bool?
+    var keyExpiryWarningDaysOverride: Int?
+    var activeKeyHealthIssueIDsOverride: [String]?
+    var spendPaceAlertActiveOverride: Bool?
     var lastFailureNotificationAt: Date?
 
     var selectedCurrency: DisplayCurrency {
@@ -59,6 +65,36 @@ struct AppConfiguration: Codable, Equatable {
     var failureNotificationsEnabled: Bool {
         get { failureNotificationsEnabledOverride ?? true }
         set { failureNotificationsEnabledOverride = newValue }
+    }
+
+    var spendPaceNotificationsEnabled: Bool {
+        get { spendPaceNotificationsEnabledOverride ?? true }
+        set { spendPaceNotificationsEnabledOverride = newValue }
+    }
+
+    var modelChangeNotificationsEnabled: Bool {
+        get { modelChangeNotificationsEnabledOverride ?? true }
+        set { modelChangeNotificationsEnabledOverride = newValue }
+    }
+
+    var keyHealthNotificationsEnabled: Bool {
+        get { keyHealthNotificationsEnabledOverride ?? true }
+        set { keyHealthNotificationsEnabledOverride = newValue }
+    }
+
+    var keyExpiryWarningDays: Int {
+        get { keyExpiryWarningDaysOverride ?? 14 }
+        set { keyExpiryWarningDaysOverride = min(90, max(1, newValue)) }
+    }
+
+    var activeKeyHealthIssueIDs: Set<String> {
+        get { Set(activeKeyHealthIssueIDsOverride ?? []) }
+        set { activeKeyHealthIssueIDsOverride = newValue.sorted() }
+    }
+
+    var spendPaceAlertActive: Bool {
+        get { spendPaceAlertActiveOverride ?? false }
+        set { spendPaceAlertActiveOverride = newValue }
     }
 
     func isAlertEnabled(_ alert: AlertKind) -> Bool {
@@ -106,6 +142,7 @@ struct PersistedMonitorState: Codable, Equatable {
     var apiKeys: [OpenRouterAPIKey] = []
     var trackedModels: [OpenRouterModel] = []
     var capturedGenerations: [CapturedGeneration] = []
+    var modelCatalogChanges: [ModelCatalogChange] = []
 
     init() {}
 
@@ -119,6 +156,7 @@ struct PersistedMonitorState: Codable, Equatable {
         apiKeys = try container.decodeIfPresent([OpenRouterAPIKey].self, forKey: .apiKeys) ?? []
         trackedModels = try container.decodeIfPresent([OpenRouterModel].self, forKey: .trackedModels) ?? []
         capturedGenerations = try container.decodeIfPresent([CapturedGeneration].self, forKey: .capturedGenerations) ?? []
+        modelCatalogChanges = try container.decodeIfPresent([ModelCatalogChange].self, forKey: .modelCatalogChanges) ?? []
     }
 }
 
@@ -214,6 +252,26 @@ final class MonitorStore: ObservableObject {
 
     var burnDownSummary: CreditBurnDownSummary? {
         CreditBurnDownSummary.make(snapshot: latestSnapshot, activitySummary: activityUsageSummary)
+    }
+
+    var spendForecastSummary: SpendForecastSummary? {
+        SpendForecastSummary.make(
+            snapshot: latestSnapshot,
+            activitySummary: activityUsageSummary,
+            monthlyBudget: state.budget.monthlyBudget
+        )
+    }
+
+    var keyHealthSummary: KeyHealthSummary {
+        KeyHealthSummary.make(
+            snapshot: latestSnapshot,
+            apiKeys: state.apiKeys,
+            expiryWarningDays: state.configuration.keyExpiryWarningDays
+        )
+    }
+
+    var recentModelCatalogChanges: [ModelCatalogChange] {
+        state.modelCatalogChanges.sorted { $0.detectedAt > $1.detectedAt }
     }
 
     var sortedAPIKeys: [OpenRouterAPIKey] {
@@ -324,6 +382,11 @@ final class MonitorStore: ObservableObject {
         save()
     }
 
+    func clearModelChangeHistory() {
+        state.modelCatalogChanges = []
+        save()
+    }
+
     func refreshModelPricingIfNeeded() async {
         guard !state.configuration.trackedModelIDs.isEmpty else { return }
         if let lastUpdated = state.configuration.modelPricingLastUpdatedAt,
@@ -362,6 +425,12 @@ final class MonitorStore: ObservableObject {
         do {
             let models = try await client.fetchModels()
             modelCatalog = models
+            let trackedIDs = state.configuration.trackedModelIDs
+            let changes = ModelCatalogChangeDetector.detect(
+                previous: state.trackedModels,
+                current: models,
+                trackedModelIDs: trackedIDs
+            )
             let modelsByKey = Dictionary(
                 models.flatMap { model in
                     [model.id, model.canonicalSlug ?? ""]
@@ -372,12 +441,18 @@ final class MonitorStore: ObservableObject {
                 uniquingKeysWith: { existing, _ in existing }
             )
 
-            let trackedIDs = state.configuration.trackedModelIDs
             state.trackedModels = trackedIDs.compactMap { modelsByKey[Self.normalizedModelID($0)] }
+            if !changes.isEmpty {
+                state.modelCatalogChanges.insert(contentsOf: changes, at: 0)
+                state.modelCatalogChanges = Array(state.modelCatalogChanges.prefix(100))
+            }
             let missingIDs = trackedIDs.filter { modelsByKey[Self.normalizedModelID($0)] == nil }
             state.configuration.modelPricingLastUpdatedAt = Date()
             state.configuration.modelPricingError = missingIDs.isEmpty ? nil : "No pricing found for: \(missingIDs.joined(separator: ", "))"
             save()
+            if state.configuration.modelChangeNotificationsEnabled, !changes.isEmpty {
+                await sendModelChangeNotification(changes)
+            }
         } catch {
             state.configuration.modelPricingError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
             save()
@@ -414,10 +489,36 @@ final class MonitorStore: ObservableObject {
             state.configuration.lastRefreshStatus = outcome.optionalDataWarning == nil ? "Connected" : "Partial data"
             state.configuration.lastRefreshError = outcome.optionalDataWarning
             state.configuration.lastFailureNotificationAt = nil
+
+            let keyHealth = KeyHealthSummary.make(
+                snapshot: outcome.snapshot,
+                apiKeys: outcome.apiKeys,
+                expiryWarningDays: state.configuration.keyExpiryWarningDays
+            )
+            let previousKeyIssueIDs = state.configuration.activeKeyHealthIssueIDs
+            let currentKeyIssueIDs = Set(keyHealth.issues.map(\.id))
+            let newKeyIssues = keyHealth.issues.filter { !previousKeyIssueIDs.contains($0.id) }
+            state.configuration.activeKeyHealthIssueIDs = currentKeyIssueIDs
+
+            let forecast = SpendForecastSummary.make(
+                snapshot: outcome.snapshot,
+                activitySummary: ActivityUsageSummary.aggregate(activityItems: outcome.activityItems),
+                monthlyBudget: state.budget.monthlyBudget
+            )
+            let shouldSendSpendPaceAlert = forecast?.isSpendSpike == true
+                && !state.configuration.spendPaceAlertActive
+                && state.configuration.spendPaceNotificationsEnabled
+            state.configuration.spendPaceAlertActive = forecast?.isSpendSpike ?? false
             save()
 
             for alert in outcome.alertDecision.newAlerts where state.configuration.isAlertEnabled(alert) {
                 await sendNotification(for: alert)
+            }
+            if state.configuration.keyHealthNotificationsEnabled, !newKeyIssues.isEmpty {
+                await sendKeyHealthNotification(newKeyIssues)
+            }
+            if shouldSendSpendPaceAlert, let forecast {
+                await sendSpendPaceNotification(forecast)
             }
         } catch {
             state.configuration.lastRefreshStatus = "Refresh failed"
@@ -486,6 +587,8 @@ final class MonitorStore: ObservableObject {
             state.configuration.lastRefreshStatus = "Not connected"
             state.configuration.lastRefreshError = nil
             state.configuration.activeAlerts = []
+            state.configuration.activeKeyHealthIssueIDs = []
+            state.configuration.spendPaceAlertActive = false
             apiKeyValidationSucceeded = false
             apiKeyValidationMessage = "Key removed from Apple Keychain."
             save()
@@ -593,6 +696,50 @@ final class MonitorStore: ObservableObject {
         try? await notificationCenter.add(request)
     }
 
+    private func sendSpendPaceNotification(_ forecast: SpendForecastSummary) async {
+        let pace = Int(((forecast.paceChangeRatio ?? 0) * 100).rounded())
+        await sendIntelligenceNotification(
+            title: "OpenRouter spend increased",
+            body: "Recent spend is \(pace)% above the previous week. Projected month-end spend is \(moneyFormatter.string(fromUSDCredits: forecast.projectedMonthEndSpend)).",
+            identifier: "spend-pace"
+        )
+    }
+
+    private func sendKeyHealthNotification(_ issues: [KeyHealthIssue]) async {
+        guard let issue = issues.first else { return }
+        let additional = issues.count > 1 ? " Plus \(issues.count - 1) more key issue\(issues.count == 2 ? "" : "s")." : ""
+        await sendIntelligenceNotification(
+            title: "OpenRouter key needs attention",
+            body: issue.notificationBody(formatter: moneyFormatter) + additional,
+            identifier: "key-health"
+        )
+    }
+
+    private func sendModelChangeNotification(_ changes: [ModelCatalogChange]) async {
+        guard let change = changes.first else { return }
+        let additional = changes.count > 1 ? " Plus \(changes.count - 1) more change\(changes.count == 2 ? "" : "s")." : ""
+        await sendIntelligenceNotification(
+            title: "Tracked model changed",
+            body: change.notificationBody(formatter: moneyFormatter) + additional,
+            identifier: "model-change"
+        )
+    }
+
+    private func sendIntelligenceNotification(title: String, body: String, identifier: String) async {
+        guard let notificationCenter else { return }
+        await requestNotificationAuthorizationIfNeeded()
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = body
+        content.sound = .default
+        let request = UNNotificationRequest(
+            identifier: "openrouter-monitor-\(identifier)-\(Date().timeIntervalSince1970)",
+            content: content,
+            trigger: nil
+        )
+        try? await notificationCenter.add(request)
+    }
+
     private func requestNotificationAuthorizationIfNeeded() async {
         guard let notificationCenter else { return }
         let settings = await notificationCenter.notificationSettings()
@@ -648,6 +795,38 @@ private extension AlertKind {
             return "Daily OpenRouter budget has been exceeded."
         case .monthlyBudget:
             return "Monthly OpenRouter budget has been exceeded."
+        }
+    }
+}
+
+private extension KeyHealthIssue {
+    func notificationBody(formatter: MoneyFormatter) -> String {
+        switch kind {
+        case .expired:
+            return "\(keyName) has expired."
+        case .expiringSoon:
+            return "\(keyName) expires in \(max(0, daysRemaining ?? 0)) days."
+        case .nearLimit:
+            return "\(keyName) has \(formatter.string(fromUSDCredits: limitRemaining ?? 0)) remaining."
+        }
+    }
+}
+
+private extension ModelCatalogChange {
+    func notificationBody(formatter: MoneyFormatter) -> String {
+        switch kind {
+        case .priceIncreased:
+            return "\(modelName) pricing increased."
+        case .priceDecreased:
+            return "\(modelName) pricing decreased."
+        case .pricingChanged:
+            return "\(modelName) pricing changed."
+        case .contextChanged:
+            return "\(modelName) context changed to \((currentContextLength ?? 0).formatted())."
+        case .expirationScheduled:
+            return "\(modelName) is scheduled to expire \(expirationDate?.formatted(date: .abbreviated, time: .omitted) ?? "soon")."
+        case .unavailable:
+            return "\(modelName) is no longer in the current model catalog."
         }
     }
 }

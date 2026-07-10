@@ -178,7 +178,7 @@ struct UsageMetricGrid: View {
             )
 
             UsageMetricCard(
-                title: "This Month",
+                title: activitySummary == nil ? "This Month" : "Last 30 Days",
                 value: money(monthSpend),
                 detail: averageDailyDetail,
                 systemImage: "chart.line.uptrend.xyaxis",
