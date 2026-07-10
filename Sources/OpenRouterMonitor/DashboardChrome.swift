@@ -30,7 +30,7 @@ struct AppHeader: View {
         .padding(.horizontal, 20)
         .padding(.top, 18)
         .padding(.bottom, 14)
-        .background(.thinMaterial)
+        .background(.bar)
         .overlay(alignment: .bottom) {
             Rectangle()
                 .fill(Color.primary.opacity(0.08))
@@ -50,27 +50,52 @@ struct AppToolbar: View {
                     await refresh()
                 }
             } label: {
-                Label(isRefreshing ? "Refreshing" : "Refresh", systemImage: "arrow.clockwise")
+                if isRefreshing {
+                    ProgressView()
+                        .controlSize(.small)
+                        .frame(width: 16, height: 16)
+                        .accessibilityLabel("Refreshing OpenRouter data")
+                } else {
+                    Image(systemName: "arrow.clockwise")
+                        .accessibilityLabel("Refresh OpenRouter data")
+                }
             }
             .disabled(isRefreshing)
+            .help(isRefreshing ? "Refreshing" : "Refresh now")
 
-            Button {
-                NSWorkspace.shared.open(URL(string: "https://openrouter.ai/activity")!)
-            } label: {
-                Label("Dashboard", systemImage: "safari")
+            SettingsLink {
+                Image(systemName: "gearshape")
+                    .accessibilityLabel("Open Settings")
+                    .frame(width: 16, height: 16)
             }
+            .help("Settings")
 
-            Button(role: .destructive) {
-                NSApplication.shared.terminate(nil)
+            Menu {
+                Button {
+                    NSWorkspace.shared.open(URL(string: "https://openrouter.ai/activity")!)
+                } label: {
+                    Label("Open OpenRouter Activity", systemImage: "safari")
+                }
+
+                Divider()
+
+                Button(role: .destructive) {
+                    NSApplication.shared.terminate(nil)
+                } label: {
+                    Label("Quit OpenRouter Monitor", systemImage: "power")
+                }
             } label: {
-                Image(systemName: "power")
-                    .accessibilityLabel("Quit OpenRouter Monitor")
+                Image(systemName: "ellipsis")
+                    .accessibilityLabel("More actions")
+                    .frame(width: 16, height: 16)
             }
-            .help("Quit")
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help("More")
         }
         .buttonStyle(.bordered)
         .controlSize(.regular)
-        .labelStyle(.titleAndIcon)
+        .labelStyle(.iconOnly)
     }
 }
 
@@ -86,6 +111,7 @@ struct NavigationTabs: View {
         }
         .pickerStyle(.segmented)
         .controlSize(.large)
+        .labelsHidden()
         .accessibilityLabel("Dashboard section")
     }
 }

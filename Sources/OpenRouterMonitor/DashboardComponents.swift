@@ -75,7 +75,7 @@ struct UsageMetricCard: View {
                 .lineLimit(2)
                 .fixedSize(horizontal: false, vertical: true)
         }
-        .frame(maxWidth: .infinity, minHeight: 126, alignment: .topLeading)
+        .frame(maxWidth: .infinity, minHeight: 112, alignment: .topLeading)
         .padding(14)
         .brandedPanel(cornerRadius: 16)
     }
@@ -178,7 +178,7 @@ struct ProminentActionButtonStyle: ButtonStyle {
             .frame(maxWidth: .infinity)
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
-            .background(Brand.actionGradient, in: RoundedRectangle(cornerRadius: 12))
+                .background(Brand.accent, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
             .foregroundStyle(.white)
             .opacity(configuration.isPressed ? 0.82 : 1)
     }

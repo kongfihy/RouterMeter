@@ -6,8 +6,12 @@ enum Brand {
     static let accentSecondary = Color(red: 0.18, green: 0.84, blue: 0.62)
     static let warning = Color(red: 1.0, green: 0.68, blue: 0.24)
     static let danger = Color(red: 1.0, green: 0.32, blue: 0.36)
-    static let panelStroke = Color.primary.opacity(0.10)
-    static let elevatedFill = Color.primary.opacity(0.045)
+    static let panelStroke = Color.primary.opacity(0.09)
+    static let panelLift = Color.primary.opacity(0.045)
+
+    static var panelFill: Color {
+        Color(nsColor: .windowBackgroundColor)
+    }
 
     static var windowBackground: LinearGradient {
         LinearGradient(
@@ -22,20 +26,9 @@ enum Brand {
 
     static var actionGradient: LinearGradient {
         LinearGradient(
-            colors: [accent, accentSecondary],
+            colors: [accent, accent.opacity(0.88)],
             startPoint: .leading,
             endPoint: .trailing
-        )
-    }
-
-    static var panelGradient: LinearGradient {
-        LinearGradient(
-            colors: [
-                Color.primary.opacity(0.060),
-                Color.primary.opacity(0.025)
-            ],
-            startPoint: .topLeading,
-            endPoint: .bottomTrailing
         )
     }
 
@@ -72,8 +65,8 @@ struct BrandIcon: View {
                     .frame(width: size * 0.72, height: size * 0.72)
             }
         }
-        .frame(width: size, height: size, alignment: .center)
-        .clipShape(RoundedRectangle(cornerRadius: max(3, size * 0.18)))
+                .frame(width: size, height: size, alignment: .center)
+        .clipShape(RoundedRectangle(cornerRadius: max(3, size * 0.18), style: .continuous))
         .contentShape(Rectangle())
         .accessibilityLabel("OpenRouter")
     }
@@ -87,27 +80,20 @@ struct BrandedPanel: ViewModifier {
     }
 
     func body(content: Content) -> some View {
-        if #available(macOS 26.0, *) {
-            content
-                .glassEffect(.regular, in: .rect(cornerRadius: cornerRadius))
-                .overlay(
-                    RoundedRectangle(cornerRadius: cornerRadius)
-                        .stroke(Brand.panelStroke, lineWidth: 1)
-                )
-                .shadow(color: .black.opacity(0.14), radius: 18, x: 0, y: 10)
-        } else {
-            content
-                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: cornerRadius))
-                .overlay(
-                    RoundedRectangle(cornerRadius: cornerRadius)
-                        .fill(Brand.panelGradient)
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: cornerRadius)
-                        .stroke(Brand.panelStroke, lineWidth: 1)
-                )
-                .shadow(color: .black.opacity(0.12), radius: 18, x: 0, y: 10)
-        }
+        content
+            .background {
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .fill(Brand.panelFill)
+                    .overlay {
+                        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                            .fill(Brand.panelLift)
+                    }
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .stroke(Brand.panelStroke, lineWidth: 1)
+            }
+            .shadow(color: .black.opacity(0.055), radius: 6, x: 0, y: 2)
     }
 }
 

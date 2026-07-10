@@ -2,7 +2,7 @@
 
 OpenRouter Monitor is a native macOS menu bar app for keeping an eye on OpenRouter API spend without opening a browser dashboard.
 
-It is built for developers, AI power users, and small teams using OpenRouter for coding agents, prototypes, production apps, or personal AI workflows. The app shows your current usage at a glance, tracks budget thresholds, and surfaces model-level activity when your API key has access to OpenRouter management analytics.
+It is built for developers, AI power users, and small teams using OpenRouter for coding agents, prototypes, production apps, or personal AI workflows. The app shows your current usage at a glance, tracks budget thresholds, and surfaces model-level activity when your API key has access to OpenRouter management analytics. The interface uses native macOS controls and stable, opaque system surfaces so account data remains clear in both light and dark appearances.
 
 ![OpenRouter Monitor dashboard](monitor-1.png)
 
@@ -10,21 +10,39 @@ It is built for developers, AI power users, and small teams using OpenRouter for
 
 - macOS menu bar item with a compact usage readout.
 - Native SwiftUI popover dashboard.
-- OpenRouter API key stored in Apple Keychain.
+- Dedicated native Settings window with system-style controls.
+- OpenRouter API keys validated before being stored in Apple Keychain.
 - Local-only cache for non-secret settings and usage snapshots.
-- Manual and scheduled refresh.
+- Immediate, manual, and scheduled refresh with setup, refreshing, connected, partial, stale, and offline states.
 - Key usage summary from OpenRouter.
 - Optional account credit balance for management-capable keys.
 - Optional model breakdown from OpenRouter activity analytics.
-- Daily spend trend from recent OpenRouter activity.
+- Interactive 30-day spend chart with dates, BYOK comparison, hover selection, token totals, and request totals.
 - BYOK-inclusive usage totals and BYOK/OpenRouter usage split.
 - Credit burn-down estimate based on remaining credits and recent spend.
 - Per-key spend overview for management-capable keys.
 - Tracked model pricing view for comparing current OpenRouter input and output rates.
+- Searchable OpenRouter model catalog and one-click price tracking from model activity.
 - Optional launch-at-login setting.
 - USD and GBP display, with manual USD-to-GBP conversion.
-- Budget alerts for low balance, critical balance, daily spend, and monthly spend.
+- Configurable notifications for budget thresholds and refresh failures, with a test action.
+- JSON export for local cached settings and usage data; API keys are never included.
 - Direct link to the OpenRouter dashboard.
+
+## Recent UI And UX Improvements
+
+- Simplified the popover to three focused sections: **Overview**, **Models**, and **Activity**.
+- Moved configuration into a dedicated native Settings window.
+- Added compact native toolbar actions for refresh, Settings, OpenRouter activity, and quit.
+- Added immediate refresh when the app starts, plus clearer setup, refreshing, connected, partial, stale, and offline states.
+- Prevented an empty API-key field from replacing or deleting the stored key.
+- Added validation before Keychain storage, automatic analytics-access detection, and an explicit confirmed removal action.
+- Added persistent budget labels, currency units, and inline validation feedback.
+- Added searchable model discovery and one-click price tracking directly from model activity.
+- Added individual notification controls, refresh-failure deduplication, permission status, and a test-notification action.
+- Added JSON export for cached settings and usage snapshots without exporting API keys.
+- Replaced refractive Liquid Glass content cards with stable semantic macOS surfaces, removing reflected navigation, colour bleeding, and position-dependent tint changes.
+- Reduced panel borders and shadows and removed the coloured dashboard background wash for cleaner visual hierarchy.
 
 ## What It Shows
 
@@ -34,19 +52,35 @@ The menu bar can show one of three display modes:
 - Percent remaining
 - Today's spend
 
-The popover dashboard shows:
+The popover dashboard is divided into three sections.
+
+### Overview
 
 - Current balance or key limit status
 - Today, week, month, and all-time usage when key-level data is available
+- Remaining-credit percentage and budget health
+
+### Models
+
+- Top model breakdown for recent activity when available
+- Request, token, cost, and usage-share summaries
+- One-click tracking for models seen in recent activity
+- Current input, output, and context pricing for user-tracked model IDs
+
+### Activity
+
 - Latest day, last 7 days, last 30 days, and request counts when activity data is available
-- Spend trend chart for recent activity
+- Interactive 30-day spend trend with visible date labels and BYOK comparison
 - BYOK and OpenRouter spend split
 - Credit burn-down estimate when account credits and activity data are available
 - Per-key spend, remaining limits, disabled status, and near-expiration labels when key list access is available
-- Top model breakdown for recent activity when available
-- Current pricing for user-tracked model IDs
+
+Across the dashboard, the app also shows:
+
 - Connection and refresh status
-- Quick actions for refresh, dashboard, and settings
+- Quick actions for refresh, OpenRouter activity, and settings
+
+The separate Settings window includes API-key management, startup behavior, refresh interval, menu-bar display, tracked models, budgets, currency conversion, notification controls, connection details, and JSON export.
 
 ## API Access
 
@@ -76,6 +110,8 @@ The app uses the following OpenRouter endpoints:
 
 If a management-only endpoint returns `403 Forbidden`, the app still keeps the key-level refresh working and shows a warning for the unavailable account, activity, or key-list data.
 
+New keys are checked against OpenRouter before they are stored. The app also probes account-credit access to determine whether the key supports management analytics. A failed validation leaves the previously stored Keychain value unchanged.
+
 ## Privacy And Storage
 
 The API key is stored only in Apple Keychain.
@@ -97,6 +133,8 @@ That file may contain:
 - Last refresh status and warnings
 
 The app does not send data to any service other than OpenRouter.
+
+The Settings window can export the cached state as JSON. The export contains the same non-secret settings and usage data described above; the Keychain API key is never included.
 
 ## Requirements
 
@@ -147,6 +185,13 @@ dist/OpenRouterMonitor.dmg
 
 The DMG contains `OpenRouterMonitor.app` and an `Applications` shortcut for drag-to-install. The app inside the DMG is ad-hoc signed for local development, not notarized.
 
+You can verify the generated image and bundled app with:
+
+```bash
+hdiutil verify dist/OpenRouterMonitor.dmg
+codesign --verify --deep --strict --verbose=2 dist/OpenRouterMonitor.app
+```
+
 ## Distribute a Release
 
 Do not commit the generated `.app` bundle or `.dmg` installer to the repository as normal tracked files. They are build artifacts and should stay out of git history.
@@ -183,7 +228,7 @@ Because the app is currently ad-hoc signed and not notarized, macOS may show a G
 
 ## Launch At Login
 
-Open the app's Settings tab and enable **Launch OpenRouter Monitor at login** to start the menu bar app automatically when you sign in to macOS.
+Open the app's Settings window and enable **Launch OpenRouter Monitor at login** to start the menu bar app automatically when you sign in to macOS.
 
 This uses macOS Login Items through `SMAppService`. If macOS reports that approval is required, open System Settings and approve OpenRouter Monitor under Login Items. This setting should be tested from the packaged `.app` bundle, ideally after moving it to `/Applications`; it is not reliable when running the app as a raw SwiftPM executable with `swift run`.
 
@@ -246,9 +291,8 @@ Planned next steps:
 - Add Developer ID signing and notarization.
 - Add a polished DMG background and layout.
 - Add multi-key profiles.
-- Add monthly usage trend charts.
 - Add historical model analytics views.
-- Add export for cached usage data.
+- Add automated light- and dark-appearance visual regression checks.
 - Add optional local proxy/import support for generation-level cost tracing.
 
 ## License

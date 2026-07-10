@@ -9,7 +9,7 @@ struct DashboardView: View {
         VStack(spacing: 0) {
             AppHeader(
                 selectedSection: $selectedSection,
-                statusText: store.state.configuration.lastRefreshStatus,
+                statusText: store.connectionState.label,
                 statusColor: statusColor,
                 isRefreshing: store.isRefreshing
             ) {
@@ -25,35 +25,34 @@ struct DashboardView: View {
                         ModelsSection()
                     case .activity:
                         ActivitySection()
-                    case .settings:
-                        DashboardSettingsSection()
                     }
                 }
                 .padding(.horizontal, 20)
                 .padding(.vertical, 18)
             }
-            .scrollIndicators(.hidden)
+            .scrollIndicators(.visible)
         }
         .frame(width: 668, height: 732)
         .background(DashboardBackground())
         .foregroundStyle(.primary)
         .tint(Brand.accent)
-        .onAppear {
-            store.startAutoRefresh()
-            Task {
-                await store.refreshModelPricingIfNeeded()
-            }
+        .task {
+            await store.start()
         }
     }
 
     private var statusColor: Color {
-        switch store.state.configuration.lastRefreshStatus {
-        case "Connected":
+        switch store.connectionState {
+        case .connected:
             return Brand.accentSecondary
-        case "Refresh failed":
+        case .offline:
             return Brand.danger
-        default:
+        case .partial, .stale:
             return Brand.warning
+        case .refreshing:
+            return Brand.accent
+        case .setupNeeded:
+            return .secondary
         }
     }
 }
@@ -62,7 +61,6 @@ enum DashboardSection: String, CaseIterable, Identifiable {
     case overview
     case models
     case activity
-    case settings
 
     var id: String { rawValue }
 
@@ -71,7 +69,6 @@ enum DashboardSection: String, CaseIterable, Identifiable {
         case .overview: return "Overview"
         case .models: return "Models"
         case .activity: return "Activity"
-        case .settings: return "Settings"
         }
     }
 
@@ -80,7 +77,6 @@ enum DashboardSection: String, CaseIterable, Identifiable {
         case .overview: return "gauge.with.dots.needle.bottom.50percent"
         case .models: return "cube.transparent"
         case .activity: return "chart.xyaxis.line"
-        case .settings: return "slider.horizontal.3"
         }
     }
 }
@@ -92,7 +88,7 @@ private struct OverviewSection: View {
         VStack(alignment: .leading, spacing: 16) {
             BalanceHeroCard(
                 snapshot: store.latestSnapshot,
-                status: store.state.configuration.lastRefreshStatus,
+                hasActiveAlerts: store.hasActiveAlerts,
                 formatter: store.moneyFormatter
             )
 
@@ -114,10 +110,15 @@ private struct ModelsSection: View {
         VStack(alignment: .leading, spacing: 16) {
             ModelBreakdownCard(
                 models: store.topModelSummaries,
+                trackedModelIDs: Set(store.state.configuration.trackedModelIDs.map { $0.lowercased() }),
                 usesManagementKey: store.state.profile.isManagementKey,
                 warning: store.state.configuration.lastRefreshError,
                 formatter: store.moneyFormatter
-            )
+            ) { modelID in
+                if store.addTrackedModelID(modelID) {
+                    Task { await store.refreshModelPricing() }
+                }
+            }
 
             ModelPricingTrackerView(
                 rows: store.trackedModelPricingRows,
@@ -162,34 +163,7 @@ private struct ActivitySection: View {
 }
 
 private struct DashboardBackground: View {
-    @Environment(\.colorScheme) private var colorScheme
-
     var body: some View {
-        ZStack {
-            Rectangle()
-                .fill(.regularMaterial)
-
-            LinearGradient(
-                colors: colorScheme == .dark ? darkColors : lightColors,
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-        }
-    }
-
-    private var darkColors: [Color] {
-        [
-            Color(red: 0.06, green: 0.07, blue: 0.09).opacity(0.96),
-            Color(red: 0.09, green: 0.10, blue: 0.12).opacity(0.90),
-            Color(red: 0.04, green: 0.08, blue: 0.07).opacity(0.92)
-        ]
-    }
-
-    private var lightColors: [Color] {
-        [
-            Color(red: 0.95, green: 0.97, blue: 1.0).opacity(0.92),
-            Color(red: 0.90, green: 0.94, blue: 0.96).opacity(0.86),
-            Color(red: 0.98, green: 0.99, blue: 0.96).opacity(0.90)
-        ]
+        Color(nsColor: .windowBackgroundColor)
     }
 }

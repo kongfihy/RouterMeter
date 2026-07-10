@@ -1,133 +1,251 @@
+import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 import OpenRouterMonitorCore
 
 struct SettingsView: View {
     @EnvironmentObject private var store: MonitorStore
     @State private var apiKey = ""
     @State private var trackedModelID = ""
+    @State private var showRemoveKeyConfirmation = false
+    @State private var notificationTestMessage: String?
+    @State private var exportMessage: String?
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 18) {
                 settingsHeader
-                apiKeySection()
-                startupSection()
-                trackedModelsSection()
+                apiKeySection
 
                 HStack(alignment: .top, spacing: 16) {
-                    refreshSection()
-                    currencySection()
+                    startupSection
+                    refreshSection
                 }
 
+                trackedModelsSection
+
                 HStack(alignment: .top, spacing: 16) {
-                    budgetSection()
-                    statusSection()
+                    budgetSection
+                    currencySection
                 }
+
+                notificationsSection
+                dataAndStatusSection
             }
-            .padding(22)
+            .padding(24)
         }
-        .scrollIndicators(.hidden)
-        .frame(width: 660, height: 680)
+        .scrollIndicators(.visible)
+        .frame(width: 720, height: 760)
         .background(Brand.windowBackground)
         .foregroundStyle(.primary)
         .tint(Brand.accent)
+        .task {
+            async let catalog: Void = store.refreshModelCatalogIfNeeded()
+            async let notifications: Void = store.refreshNotificationAuthorizationStatus()
+            _ = await (catalog, notifications)
+        }
     }
 
     private var settingsHeader: some View {
-        HStack(spacing: 12) {
-            BrandIcon(size: 36)
+        HStack(spacing: 14) {
+            BrandIcon(size: 42)
+
             VStack(alignment: .leading, spacing: 3) {
-                Text("OpenRouter Monitor")
-                    .font(.system(size: 26, weight: .semibold, design: .rounded))
-                Text("API access, budget thresholds, and display preferences")
+                Text("Settings")
+                    .font(.system(size: 28, weight: .semibold, design: .rounded))
+                Text("OpenRouter access, display, budgets, and notifications")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
+
             Spacer()
+
             StatusBadge(
-                title: store.state.profile.hasStoredKey ? "Key Stored" : "No Key",
-                systemImage: store.state.profile.hasStoredKey ? "checkmark.seal.fill" : "exclamationmark.triangle.fill",
-                color: store.state.profile.hasStoredKey ? Brand.accentSecondary : Brand.warning
+                title: store.connectionState.label,
+                systemImage: connectionStatusImage,
+                color: connectionStatusColor
             )
         }
-        .padding(18)
-        .brandedPanel()
+        .padding(.horizontal, 2)
+        .padding(.bottom, 2)
     }
 
-    private func apiKeySection() -> some View {
+    private var apiKeySection: some View {
         SettingsCard(title: "OpenRouter API Key", systemImage: "key.horizontal") {
-            VStack(alignment: .leading, spacing: 12) {
-                Text("Your key is stored in Apple Keychain. Leave the field empty unless you want to replace it.")
+            VStack(alignment: .leading, spacing: 14) {
+                Text("Keys are validated before being stored in Apple Keychain. Account analytics access is detected automatically.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
-                SecureField(store.storedAPIKeyPlaceholder(), text: $apiKey)
-                    .textFieldStyle(.roundedBorder)
+                LabeledContent("API key") {
+                    SecureField(store.storedAPIKeyPlaceholder(), text: $apiKey)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 430)
+                        .accessibilityLabel("OpenRouter API key")
+                }
 
-                Toggle("Management-capable key", isOn: $store.state.profile.isManagementKey)
-                    .onChange(of: store.state.profile.isManagementKey) { _, _ in store.save() }
+                LabeledContent("Analytics access") {
+                    StatusBadge(
+                        title: store.state.profile.isManagementKey ? "Account + activity" : "Key-level usage",
+                        systemImage: store.state.profile.isManagementKey ? "checkmark.circle.fill" : "info.circle.fill",
+                        color: store.state.profile.isManagementKey ? Brand.accentSecondary : .secondary
+                    )
+                }
 
-                HStack {
+                HStack(spacing: 10) {
                     Button {
-                        store.saveAPIKey(apiKey)
-                        apiKey = ""
+                        Task {
+                            if await store.validateAndSaveAPIKey(apiKey) {
+                                apiKey = ""
+                            }
+                        }
                     } label: {
-                        Label("Save Key", systemImage: "key.fill")
+                        if store.isValidatingAPIKey {
+                            Label("Validating", systemImage: "arrow.triangle.2.circlepath")
+                        } else {
+                            Label("Validate & Save", systemImage: "checkmark.shield")
+                        }
                     }
                     .buttonStyle(.borderedProminent)
+                    .disabled(apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || store.isValidatingAPIKey)
 
-                    Button(role: .destructive) {
-                        apiKey = ""
-                        store.saveAPIKey("")
-                    } label: {
-                        Label("Remove Key", systemImage: "trash")
+                    Button("Remove Key", systemImage: "trash", role: .destructive) {
+                        showRemoveKeyConfirmation = true
                     }
                     .buttonStyle(.bordered)
+                    .disabled(!store.state.profile.hasStoredKey)
 
                     Spacer()
                 }
+
+                if let message = store.apiKeyValidationMessage {
+                    Label(
+                        message,
+                        systemImage: store.apiKeyValidationSucceeded ? "checkmark.circle.fill" : "exclamationmark.triangle.fill"
+                    )
+                    .font(.caption)
+                    .foregroundStyle(store.apiKeyValidationSucceeded ? Brand.accentSecondary : Brand.warning)
+                    .fixedSize(horizontal: false, vertical: true)
+                }
             }
+        }
+        .confirmationDialog(
+            "Remove the OpenRouter API key?",
+            isPresented: $showRemoveKeyConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Remove Key", role: .destructive) {
+                apiKey = ""
+                store.removeAPIKey()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("The key will be deleted from Apple Keychain. Cached usage data will remain on this Mac.")
         }
     }
 
-    private func startupSection() -> some View {
+    private var startupSection: some View {
         SettingsCard(title: "Startup", systemImage: "power") {
             LaunchAtLoginToggle()
         }
+        .frame(maxWidth: .infinity)
     }
 
-    private func trackedModelsSection() -> some View {
-        SettingsCard(title: "Tracked Models", systemImage: "tag") {
+    private var refreshSection: some View {
+        SettingsCard(title: "Refresh", systemImage: "arrow.clockwise") {
+            VStack(alignment: .leading, spacing: 14) {
+                LabeledContent("Menu bar") {
+                    Picker("Menu bar display", selection: $store.state.configuration.menuBarModeRawValue) {
+                        ForEach(MenuBarDisplayMode.allCases, id: \.rawValue) { mode in
+                            Text(mode.label).tag(mode.rawValue)
+                        }
+                    }
+                    .labelsHidden()
+                    .frame(width: 160)
+                    .onChange(of: store.state.configuration.menuBarModeRawValue) { _, _ in store.save() }
+                }
+
+                LabeledContent("Interval") {
+                    Stepper(
+                        "Every \(Int(store.state.configuration.refreshIntervalMinutes)) min",
+                        value: $store.state.configuration.refreshIntervalMinutes,
+                        in: 1...60,
+                        step: 1
+                    )
+                    .onChange(of: store.state.configuration.refreshIntervalMinutes) { _, _ in store.save() }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private var trackedModelsSection: some View {
+        SettingsCard(title: "Tracked Model Prices", systemImage: "tag") {
             VStack(alignment: .leading, spacing: 12) {
-                Text("Add OpenRouter model IDs to show current input and output prices in the Pricing tab.")
+                Text("Search the current OpenRouter model catalog or enter an exact provider/model ID.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
                 HStack(spacing: 8) {
-                    TextField("provider/model-id", text: $trackedModelID)
+                    TextField("Search models or paste provider/model-id", text: $trackedModelID)
                         .textFieldStyle(.roundedBorder)
                         .onSubmit(addTrackedModel)
 
-                    Button {
-                        addTrackedModel()
-                    } label: {
-                        Label("Add", systemImage: "plus")
-                    }
-                    .buttonStyle(.borderedProminent)
+                    Button("Add", systemImage: "plus", action: addTrackedModel)
+                        .buttonStyle(.borderedProminent)
+                        .disabled(trackedModelID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
 
                     Button {
-                        Task {
-                            await store.refreshModelPricing()
-                        }
+                        Task { await store.refreshModelPricing() }
                     } label: {
-                        Label(store.isRefreshingModelPrices ? "Refreshing" : "Refresh", systemImage: "arrow.clockwise")
+                        Label(store.isRefreshingModelPrices ? "Refreshing" : "Refresh Prices", systemImage: "arrow.clockwise")
                     }
                     .buttonStyle(.bordered)
                     .disabled(store.isRefreshingModelPrices || store.state.configuration.trackedModelIDs.isEmpty)
                 }
 
+                if !modelSuggestions.isEmpty {
+                    VStack(spacing: 0) {
+                        ForEach(modelSuggestions) { model in
+                            Button {
+                                trackedModelID = model.id
+                                addTrackedModel()
+                            } label: {
+                                HStack(spacing: 10) {
+                                    Image(systemName: "cube.transparent")
+                                        .foregroundStyle(Brand.accent)
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(model.name)
+                                            .font(.callout.weight(.semibold))
+                                        Text(model.id)
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    Spacer()
+                                    Text("Add")
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundStyle(Brand.accent)
+                                }
+                                .contentShape(Rectangle())
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 8)
+                            }
+                            .buttonStyle(.plain)
+
+                            if model.id != modelSuggestions.last?.id {
+                                Divider()
+                            }
+                        }
+                    }
+                    .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .stroke(Brand.panelStroke, lineWidth: 1)
+                    )
+                }
+
                 if store.state.configuration.trackedModelIDs.isEmpty {
-                    Text("Examples use OpenRouter IDs such as openai/gpt-4.1 or anthropic/claude-sonnet-4.")
+                    Text("No models tracked yet.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 } else {
@@ -140,14 +258,8 @@ struct SettingsView: View {
                     }
                 }
 
-                if let lastUpdatedAt = store.state.configuration.modelPricingLastUpdatedAt {
-                    Text("Prices last refreshed \(lastUpdatedAt.formatted(date: .abbreviated, time: .shortened)).")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-
                 if let error = store.state.configuration.modelPricingError {
-                    Text(error)
+                    Label(error, systemImage: "exclamationmark.triangle.fill")
                         .font(.caption)
                         .foregroundStyle(Brand.warning)
                         .fixedSize(horizontal: false, vertical: true)
@@ -156,71 +268,120 @@ struct SettingsView: View {
         }
     }
 
-    private func refreshSection() -> some View {
-        SettingsCard(title: "Refresh", systemImage: "arrow.clockwise") {
-            VStack(alignment: .leading, spacing: 14) {
-                Picker("Menu bar display", selection: $store.state.configuration.menuBarModeRawValue) {
-                    ForEach(MenuBarDisplayMode.allCases, id: \.rawValue) { mode in
-                        Text(mode.label).tag(mode.rawValue)
-                    }
-                }
-                .onChange(of: store.state.configuration.menuBarModeRawValue) { _, _ in store.save() }
+    private var budgetSection: some View {
+        SettingsCard(title: "Budgets", systemImage: "gauge.with.dots.needle.bottom.50percent") {
+            VStack(alignment: .leading, spacing: 12) {
+                budgetField("Low balance", value: $store.state.budget.lowBalanceThreshold)
+                budgetField("Critical balance", value: $store.state.budget.criticalBalanceThreshold)
+                budgetField("Daily budget", value: $store.state.budget.dailyBudget)
+                budgetField("Monthly budget", value: $store.state.budget.monthlyBudget)
 
-                Stepper(
-                    "Every \(Int(store.state.configuration.refreshIntervalMinutes)) minutes",
-                    value: $store.state.configuration.refreshIntervalMinutes,
-                    in: 1...60,
-                    step: 1
-                )
-                .onChange(of: store.state.configuration.refreshIntervalMinutes) { _, _ in store.save() }
+                if let budgetValidationMessage {
+                    Label(budgetValidationMessage, systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption)
+                        .foregroundStyle(Brand.warning)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
+            .onChange(of: store.state.budget) { _, _ in store.save() }
         }
+        .frame(maxWidth: .infinity)
     }
 
-    private func currencySection() -> some View {
+    private var currencySection: some View {
         SettingsCard(title: "Currency", systemImage: "dollarsign.circle") {
             VStack(alignment: .leading, spacing: 14) {
-                Picker("Display currency", selection: $store.state.configuration.selectedCurrencyRawValue) {
-                    ForEach(DisplayCurrency.allCases, id: \.rawValue) { currency in
-                        Text(currency.code).tag(currency.rawValue)
+                LabeledContent("Display") {
+                    Picker("Display currency", selection: $store.state.configuration.selectedCurrencyRawValue) {
+                        ForEach(DisplayCurrency.allCases, id: \.rawValue) { currency in
+                            Text(currency.code).tag(currency.rawValue)
+                        }
                     }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .frame(width: 150)
+                    .onChange(of: store.state.configuration.selectedCurrencyRawValue) { _, _ in store.save() }
                 }
-                .pickerStyle(.segmented)
-                .onChange(of: store.state.configuration.selectedCurrencyRawValue) { _, _ in store.save() }
 
-                TextField("USD to GBP", value: $store.state.configuration.usdToGBPRate, format: .number)
+                LabeledContent("USD → GBP") {
+                    TextField(
+                        "Exchange rate",
+                        value: $store.state.configuration.usdToGBPRate,
+                        format: .number.precision(.fractionLength(2...4))
+                    )
                     .textFieldStyle(.roundedBorder)
+                    .frame(width: 100)
                     .disabled(store.state.configuration.selectedCurrency != .gbp)
                     .onChange(of: store.state.configuration.usdToGBPRate) { _, _ in store.save() }
+                }
 
-                Text("OpenRouter credits stay stored as USD. GBP is display-only using the manual rate above.")
+                Text("GBP remains display-only and uses the manual rate above.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
         }
+        .frame(maxWidth: .infinity)
     }
 
-    private func budgetSection() -> some View {
-        SettingsCard(title: "Budgets", systemImage: "gauge.with.dots.needle.bottom.50percent") {
+    private var notificationsSection: some View {
+        SettingsCard(title: "Notifications", systemImage: "bell.badge") {
             VStack(alignment: .leading, spacing: 12) {
-                TextField("Low balance threshold", value: $store.state.budget.lowBalanceThreshold, format: .number)
-                    .textFieldStyle(.roundedBorder)
-                TextField("Critical balance threshold", value: $store.state.budget.criticalBalanceThreshold, format: .number)
-                    .textFieldStyle(.roundedBorder)
-                TextField("Daily budget", value: $store.state.budget.dailyBudget, format: .number)
-                    .textFieldStyle(.roundedBorder)
-                TextField("Monthly budget", value: $store.state.budget.monthlyBudget, format: .number)
-                    .textFieldStyle(.roundedBorder)
+                HStack(alignment: .top, spacing: 24) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Toggle("Low balance", isOn: $store.state.configuration.lowBalanceAlertEnabled)
+                        Toggle("Critical balance", isOn: $store.state.configuration.criticalBalanceAlertEnabled)
+                        Toggle("Daily budget", isOn: $store.state.configuration.dailyBudgetAlertEnabled)
+                    }
+
+                    VStack(alignment: .leading, spacing: 10) {
+                        Toggle("Monthly budget", isOn: $store.state.configuration.monthlyBudgetAlertEnabled)
+                        Toggle("Refresh failures", isOn: $store.state.configuration.failureNotificationsEnabled)
+                    }
+                }
+                .onChange(of: store.state.configuration.lowBalanceAlertEnabled) { _, _ in store.save() }
+                .onChange(of: store.state.configuration.criticalBalanceAlertEnabled) { _, _ in store.save() }
+                .onChange(of: store.state.configuration.dailyBudgetAlertEnabled) { _, _ in store.save() }
+                .onChange(of: store.state.configuration.monthlyBudgetAlertEnabled) { _, _ in store.save() }
+                .onChange(of: store.state.configuration.failureNotificationsEnabled) { _, _ in store.save() }
+
+                Divider()
+
+                HStack {
+                    LabeledContent("System permission") {
+                        Text(store.notificationAuthorizationText)
+                            .font(.caption.weight(.semibold))
+                    }
+
+                    Spacer()
+
+                    Button("Test Notification", systemImage: "bell") {
+                        Task {
+                            notificationTestMessage = await store.sendTestNotification()
+                                ? "Test notification sent."
+                                : "Notifications are not currently available."
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                }
+
+                if let notificationTestMessage {
+                    Text(notificationTestMessage)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
-            .onChange(of: store.state.budget) { _, _ in store.save() }
         }
     }
 
-    private func statusSection() -> some View {
-        SettingsCard(title: "Status", systemImage: "checklist") {
+    private var dataAndStatusSection: some View {
+        SettingsCard(title: "Status & Data", systemImage: "checklist") {
             VStack(alignment: .leading, spacing: 12) {
+                SettingsStatusRow(label: "Connection", value: store.connectionState.label)
                 SettingsStatusRow(label: "Stored key", value: store.state.profile.hasStoredKey ? "Yes" : "No")
-                SettingsStatusRow(label: "Last status", value: store.state.configuration.lastRefreshStatus)
+                SettingsStatusRow(
+                    label: "Analytics",
+                    value: store.state.profile.isManagementKey ? "Account + activity" : "Key-level"
+                )
 
                 if let lastValidatedAt = store.state.profile.lastValidatedAt {
                     SettingsStatusRow(
@@ -230,11 +391,92 @@ struct SettingsView: View {
                 }
 
                 if let error = store.state.configuration.lastRefreshError {
-                    Text(error)
+                    Label(error, systemImage: "exclamationmark.triangle.fill")
                         .font(.caption)
                         .foregroundStyle(Brand.warning)
                         .fixedSize(horizontal: false, vertical: true)
                 }
+
+                Divider()
+
+                HStack {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Export cached usage")
+                            .font(.callout.weight(.semibold))
+                        Text("Exports local settings and usage snapshots as JSON. API keys are never included.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Spacer()
+
+                    Button("Export JSON…", systemImage: "square.and.arrow.up") {
+                        exportData()
+                    }
+                    .buttonStyle(.bordered)
+                }
+
+                if let exportMessage {
+                    Text(exportMessage)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    private var modelSuggestions: [OpenRouterModel] {
+        store.modelSuggestions(matching: trackedModelID)
+    }
+
+    private var budgetValidationMessage: String? {
+        let budget = store.state.budget
+        if budget.lowBalanceThreshold < 0 || budget.criticalBalanceThreshold < 0
+            || budget.dailyBudget < 0 || budget.monthlyBudget < 0 {
+            return "Budget values cannot be negative."
+        }
+        if budget.criticalBalanceThreshold > budget.lowBalanceThreshold {
+            return "Critical balance must be lower than the low-balance threshold."
+        }
+        return nil
+    }
+
+    private var connectionStatusImage: String {
+        switch store.connectionState {
+        case .connected: return "checkmark.circle.fill"
+        case .refreshing: return "arrow.triangle.2.circlepath"
+        case .partial, .stale: return "exclamationmark.triangle.fill"
+        case .offline: return "wifi.slash"
+        case .setupNeeded: return "gearshape.fill"
+        }
+    }
+
+    private var connectionStatusColor: Color {
+        switch store.connectionState {
+        case .connected: return Brand.accentSecondary
+        case .refreshing: return Brand.accent
+        case .partial, .stale: return Brand.warning
+        case .offline: return Brand.danger
+        case .setupNeeded: return .secondary
+        }
+    }
+
+    private func budgetField(_ title: String, value: Binding<Double>) -> some View {
+        LabeledContent(title) {
+            HStack(spacing: 6) {
+                Text(store.state.configuration.selectedCurrency.code)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+
+                TextField(
+                    title,
+                    value: value,
+                    format: .number.precision(.fractionLength(0...2))
+                )
+                .labelsHidden()
+                .textFieldStyle(.roundedBorder)
+                .frame(width: 92)
+                .accessibilityLabel(title)
             }
         }
     }
@@ -242,9 +484,23 @@ struct SettingsView: View {
     private func addTrackedModel() {
         if store.addTrackedModelID(trackedModelID) {
             trackedModelID = ""
-            Task {
-                await store.refreshModelPricing()
-            }
+            Task { await store.refreshModelPricing() }
+        }
+    }
+
+    private func exportData() {
+        let panel = NSSavePanel()
+        panel.title = "Export OpenRouter Monitor Data"
+        panel.nameFieldStringValue = "openrouter-monitor-export.json"
+        panel.allowedContentTypes = [.json]
+        panel.canCreateDirectories = true
+
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            try store.exportState(to: url)
+            exportMessage = "Exported to \(url.lastPathComponent)."
+        } catch {
+            exportMessage = "Export failed: \(error.localizedDescription)"
         }
     }
 }
@@ -262,19 +518,16 @@ private struct SettingsCard<Content: View>: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 8) {
-                Image(systemName: systemImage)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(Brand.accent)
-                Text(title)
-                    .font(.headline.weight(.semibold))
-            }
+            Label(title, systemImage: systemImage)
+                .font(.headline.weight(.semibold))
+                .foregroundStyle(.primary)
+                .symbolRenderingMode(.hierarchical)
 
             content
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .padding(16)
-        .brandedPanel()
+        .brandedPanel(cornerRadius: 16)
     }
 }
 
@@ -283,11 +536,7 @@ private struct SettingsStatusRow: View {
     let value: String
 
     var body: some View {
-        HStack {
-            Text(label)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Spacer()
+        LabeledContent(label) {
             Text(value)
                 .font(.caption.weight(.semibold))
                 .lineLimit(1)
@@ -305,7 +554,7 @@ private struct TrackedModelIDRow: View {
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(Brand.accent)
                 .frame(width: 24, height: 24)
-                .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 7))
+                .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
 
             Text(modelID)
                 .font(.caption.weight(.semibold))
@@ -322,7 +571,7 @@ private struct TrackedModelIDRow: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
-        .background(Color.white.opacity(0.045), in: RoundedRectangle(cornerRadius: 8))
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 }
 
@@ -336,7 +585,7 @@ private struct StatusBadge: View {
             .font(.caption.weight(.semibold))
             .padding(.horizontal, 10)
             .padding(.vertical, 7)
-            .background(Capsule().fill(color.opacity(0.16)))
+            .background(Capsule().fill(color.opacity(0.14)))
             .foregroundStyle(color)
     }
 }

@@ -14,6 +14,12 @@ struct AppConfiguration: Codable, Equatable {
     var trackedModelIDs: [String] = []
     var modelPricingLastUpdatedAt: Date?
     var modelPricingError: String?
+    var lowBalanceAlertEnabledOverride: Bool?
+    var criticalBalanceAlertEnabledOverride: Bool?
+    var dailyBudgetAlertEnabledOverride: Bool?
+    var monthlyBudgetAlertEnabledOverride: Bool?
+    var failureNotificationsEnabledOverride: Bool?
+    var lastFailureNotificationAt: Date?
 
     var selectedCurrency: DisplayCurrency {
         get { DisplayCurrency(rawValue: selectedCurrencyRawValue) ?? .usd }
@@ -28,6 +34,40 @@ struct AppConfiguration: Codable, Equatable {
     var activeAlerts: Set<AlertKind> {
         get { Set(activeAlertRawValues.compactMap(AlertKind.init(rawValue:))) }
         set { activeAlertRawValues = newValue.map(\.rawValue).sorted() }
+    }
+
+    var lowBalanceAlertEnabled: Bool {
+        get { lowBalanceAlertEnabledOverride ?? true }
+        set { lowBalanceAlertEnabledOverride = newValue }
+    }
+
+    var criticalBalanceAlertEnabled: Bool {
+        get { criticalBalanceAlertEnabledOverride ?? true }
+        set { criticalBalanceAlertEnabledOverride = newValue }
+    }
+
+    var dailyBudgetAlertEnabled: Bool {
+        get { dailyBudgetAlertEnabledOverride ?? true }
+        set { dailyBudgetAlertEnabledOverride = newValue }
+    }
+
+    var monthlyBudgetAlertEnabled: Bool {
+        get { monthlyBudgetAlertEnabledOverride ?? true }
+        set { monthlyBudgetAlertEnabledOverride = newValue }
+    }
+
+    var failureNotificationsEnabled: Bool {
+        get { failureNotificationsEnabledOverride ?? true }
+        set { failureNotificationsEnabledOverride = newValue }
+    }
+
+    func isAlertEnabled(_ alert: AlertKind) -> Bool {
+        switch alert {
+        case .lowBalance: return lowBalanceAlertEnabled
+        case .criticalBalance: return criticalBalanceAlertEnabled
+        case .dailyBudget: return dailyBudgetAlertEnabled
+        case .monthlyBudget: return monthlyBudgetAlertEnabled
+        }
     }
 }
 
@@ -82,16 +122,43 @@ struct PersistedMonitorState: Codable, Equatable {
     }
 }
 
+enum MonitorConnectionState: Equatable {
+    case setupNeeded
+    case refreshing
+    case connected
+    case partial
+    case stale
+    case offline
+
+    var label: String {
+        switch self {
+        case .setupNeeded: return "Setup needed"
+        case .refreshing: return "Refreshing"
+        case .connected: return "Connected"
+        case .partial: return "Partial data"
+        case .stale: return "Stale"
+        case .offline: return "Offline"
+        }
+    }
+}
+
 @MainActor
 final class MonitorStore: ObservableObject {
     @Published var state: PersistedMonitorState
     @Published var isRefreshing = false
     @Published var isRefreshingModelPrices = false
+    @Published var isValidatingAPIKey = false
+    @Published var apiKeyValidationMessage: String?
+    @Published var apiKeyValidationSucceeded = false
+    @Published private(set) var modelCatalog: [OpenRouterModel] = []
+    @Published private(set) var notificationAuthorizationText = "Checking…"
+    @Published private(set) var notificationAuthorizationGranted = false
 
     private let keychain = KeychainStore()
     private let client = OpenRouterClient()
     private var timer: Timer?
     private let stateURL: URL
+    private var hasStarted = false
 
     init() {
         stateURL = Self.defaultStateURL()
@@ -101,6 +168,33 @@ final class MonitorStore: ObservableObject {
 
     var latestSnapshot: UsageSnapshot? {
         state.snapshots.sorted { $0.capturedAt > $1.capturedAt }.first
+    }
+
+    var connectionState: MonitorConnectionState {
+        if isRefreshing {
+            return .refreshing
+        }
+        if !state.profile.hasStoredKey {
+            return .setupNeeded
+        }
+        if state.configuration.lastRefreshStatus == "Refresh failed" {
+            return .offline
+        }
+        guard let latestSnapshot else {
+            return .stale
+        }
+        let staleAfter = max(state.configuration.refreshIntervalMinutes * 120, 900)
+        if Date().timeIntervalSince(latestSnapshot.capturedAt) > staleAfter {
+            return .stale
+        }
+        if state.configuration.lastRefreshError != nil || state.configuration.lastRefreshStatus == "Partial data" {
+            return .partial
+        }
+        return .connected
+    }
+
+    var hasActiveAlerts: Bool {
+        !state.configuration.activeAlerts.isEmpty
     }
 
     var moneyFormatter: MoneyFormatter {
@@ -148,6 +242,36 @@ final class MonitorStore: ObservableObject {
                 model: modelsByKey[Self.normalizedModelID(modelID)]
             )
         }
+    }
+
+    func modelSuggestions(matching query: String, limit: Int = 6) -> [OpenRouterModel] {
+        let normalized = Self.normalizedModelID(query)
+        guard !normalized.isEmpty else { return [] }
+        return Array(
+            modelCatalog
+                .filter { model in
+                    Self.normalizedModelID(model.id).contains(normalized)
+                        || model.name.lowercased().contains(normalized)
+                }
+                .sorted { lhs, rhs in
+                    let lhsStarts = Self.normalizedModelID(lhs.id).hasPrefix(normalized)
+                    let rhsStarts = Self.normalizedModelID(rhs.id).hasPrefix(normalized)
+                    if lhsStarts != rhsStarts { return lhsStarts }
+                    return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+                }
+                .prefix(limit)
+        )
+    }
+
+    func start() async {
+        startAutoRefresh()
+        guard !hasStarted else { return }
+        hasStarted = true
+
+        if state.profile.hasStoredKey {
+            await refresh()
+        }
+        await refreshModelPricingIfNeeded()
     }
 
     func startAutoRefresh() {
@@ -210,6 +334,18 @@ final class MonitorStore: ObservableObject {
         await refreshModelPricing()
     }
 
+    func refreshModelCatalogIfNeeded() async {
+        guard modelCatalog.isEmpty, !isRefreshingModelPrices else { return }
+        isRefreshingModelPrices = true
+        defer { isRefreshingModelPrices = false }
+
+        do {
+            modelCatalog = try await client.fetchModels()
+        } catch {
+            state.configuration.modelPricingError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        }
+    }
+
     func refreshModelPricing() async {
         guard !isRefreshingModelPrices else { return }
         guard !state.configuration.trackedModelIDs.isEmpty else {
@@ -225,6 +361,7 @@ final class MonitorStore: ObservableObject {
 
         do {
             let models = try await client.fetchModels()
+            modelCatalog = models
             let modelsByKey = Dictionary(
                 models.flatMap { model in
                     [model.id, model.canonicalSlug ?? ""]
@@ -269,40 +406,155 @@ final class MonitorStore: ObservableObject {
             state.profile.label = outcome.snapshot.keyLabel
             state.profile.hasStoredKey = true
             state.profile.lastValidatedAt = Date()
-            state.configuration.activeAlerts = outcome.alertDecision.activeAlerts
-            state.configuration.lastRefreshStatus = outcome.optionalDataWarning == nil ? "Connected" : "Connected"
+            state.configuration.activeAlerts = Set(
+                outcome.alertDecision.activeAlerts.filter {
+                    state.configuration.isAlertEnabled($0)
+                }
+            )
+            state.configuration.lastRefreshStatus = outcome.optionalDataWarning == nil ? "Connected" : "Partial data"
             state.configuration.lastRefreshError = outcome.optionalDataWarning
+            state.configuration.lastFailureNotificationAt = nil
             save()
 
-            for alert in outcome.alertDecision.newAlerts {
+            for alert in outcome.alertDecision.newAlerts where state.configuration.isAlertEnabled(alert) {
                 await sendNotification(for: alert)
             }
         } catch {
             state.configuration.lastRefreshStatus = "Refresh failed"
             state.configuration.lastRefreshError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            let shouldNotify = state.configuration.failureNotificationsEnabled
+                && shouldSendFailureNotification
+            if shouldNotify {
+                state.configuration.lastFailureNotificationAt = Date()
+            }
             save()
-            await sendFailureNotification(message: state.configuration.lastRefreshError ?? "Refresh failed.")
+            if shouldNotify {
+                await sendFailureNotification(message: state.configuration.lastRefreshError ?? "Refresh failed.")
+            }
         }
     }
 
-    func saveAPIKey(_ apiKey: String) {
+    @discardableResult
+    func validateAndSaveAPIKey(_ apiKey: String) async -> Bool {
+        let trimmed = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            apiKeyValidationSucceeded = false
+            apiKeyValidationMessage = "Enter a key before validating."
+            return false
+        }
+
+        guard !isValidatingAPIKey else { return false }
+        isValidatingAPIKey = true
+        apiKeyValidationMessage = nil
+        defer { isValidatingAPIKey = false }
+
         do {
-            let trimmed = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
-            if trimmed.isEmpty {
-                try keychain.deleteAPIKey()
-                state.profile.hasStoredKey = false
-            } else {
-                try keychain.saveAPIKey(trimmed)
-                state.profile.hasStoredKey = true
+            let keyResponse = try await client.fetchKey(apiKey: trimmed)
+            var isManagementKey = false
+            do {
+                _ = try await client.fetchCredits(apiKey: trimmed)
+                isManagementKey = true
+            } catch OpenRouterClientError.forbidden {
+                isManagementKey = false
+            } catch {
+                isManagementKey = false
             }
+
+            try keychain.saveAPIKey(trimmed)
+            state.profile.label = keyResponse.data.label
+            state.profile.hasStoredKey = true
+            state.profile.isManagementKey = isManagementKey
+            state.profile.lastValidatedAt = Date()
+            apiKeyValidationSucceeded = true
+            apiKeyValidationMessage = isManagementKey
+                ? "Key validated with account analytics access."
+                : "Key validated with key-level usage access."
+            save()
+            await refresh()
+            return true
+        } catch {
+            apiKeyValidationSucceeded = false
+            apiKeyValidationMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            return false
+        }
+    }
+
+    func removeAPIKey() {
+        do {
+            try keychain.deleteAPIKey()
+            state.profile = ApiKeyProfile()
+            state.configuration.lastRefreshStatus = "Not connected"
+            state.configuration.lastRefreshError = nil
+            state.configuration.activeAlerts = []
+            apiKeyValidationSucceeded = false
+            apiKeyValidationMessage = "Key removed from Apple Keychain."
             save()
         } catch {
-            assertionFailure("Keychain save failed: \(error)")
+            apiKeyValidationSucceeded = false
+            apiKeyValidationMessage = "Could not remove the key: \(error.localizedDescription)"
         }
     }
 
     func storedAPIKeyPlaceholder() -> String {
         state.profile.hasStoredKey ? "Stored in Keychain" : "Paste OpenRouter API key"
+    }
+
+    func exportState(to url: URL) throws {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.dateEncodingStrategy = .iso8601
+        try encoder.encode(state).write(to: url, options: [.atomic])
+    }
+
+    func refreshNotificationAuthorizationStatus() async {
+        guard let notificationCenter else {
+            notificationAuthorizationText = "Available in the packaged app"
+            notificationAuthorizationGranted = false
+            return
+        }
+
+        let settings = await notificationCenter.notificationSettings()
+        switch settings.authorizationStatus {
+        case .authorized, .provisional, .ephemeral:
+            notificationAuthorizationText = "Allowed"
+            notificationAuthorizationGranted = true
+        case .denied:
+            notificationAuthorizationText = "Not allowed in System Settings"
+            notificationAuthorizationGranted = false
+        case .notDetermined:
+            notificationAuthorizationText = "Not requested"
+            notificationAuthorizationGranted = false
+        @unknown default:
+            notificationAuthorizationText = "Unknown"
+            notificationAuthorizationGranted = false
+        }
+    }
+
+    @discardableResult
+    func sendTestNotification() async -> Bool {
+        guard let notificationCenter else {
+            await refreshNotificationAuthorizationStatus()
+            return false
+        }
+        await requestNotificationAuthorizationIfNeeded()
+        await refreshNotificationAuthorizationStatus()
+        guard notificationAuthorizationGranted else { return false }
+
+        let content = UNMutableNotificationContent()
+        content.title = "OpenRouter Monitor"
+        content.body = "Notifications are ready."
+        content.sound = .default
+        let request = UNNotificationRequest(
+            identifier: "openrouter-monitor-test-\(Date().timeIntervalSince1970)",
+            content: content,
+            trigger: nil
+        )
+        do {
+            try await notificationCenter.add(request)
+            return true
+        } catch {
+            return false
+        }
     }
 
     private func refreshStoredKeyFlag() {
@@ -346,6 +598,11 @@ final class MonitorStore: ObservableObject {
         let settings = await notificationCenter.notificationSettings()
         guard settings.authorizationStatus == .notDetermined else { return }
         _ = try? await notificationCenter.requestAuthorization(options: [.alert, .sound])
+    }
+
+    private var shouldSendFailureNotification: Bool {
+        guard let lastSent = state.configuration.lastFailureNotificationAt else { return true }
+        return Date().timeIntervalSince(lastSent) > 1_800
     }
 
     private static func defaultStateURL() -> URL {

@@ -46,19 +46,19 @@ struct ModelPricingTrackerView: View {
             } else {
                 VStack(spacing: 0) {
                     ModelPricingHeader()
-                    Divider().overlay(Color.white.opacity(0.08))
+                    Divider().overlay(Color.primary.opacity(0.08))
 
                     ForEach(rows) { row in
                         ModelPricingRowView(row: row)
                         if row.id != rows.last?.id {
-                            Divider().overlay(Color.white.opacity(0.08))
+                            Divider().overlay(Color.primary.opacity(0.08))
                         }
                     }
                 }
-                .background(Color.white.opacity(0.035), in: RoundedRectangle(cornerRadius: 8))
+                .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 8)
-                        .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .stroke(Color.primary.opacity(0.08), lineWidth: 1)
                 )
             }
         }

@@ -119,9 +119,11 @@ struct APIKeyRow: View {
 
 struct ModelBreakdownCard: View {
     let models: [ModelUsageSummary]
+    let trackedModelIDs: Set<String>
     let usesManagementKey: Bool
     let warning: String?
     let formatter: MoneyFormatter
+    let trackModel: (String) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -144,7 +146,9 @@ struct ModelBreakdownCard: View {
                             model: model,
                             maxUsage: maxUsage,
                             totalUsage: totalUsage,
-                            formatter: formatter
+                            formatter: formatter,
+                            isTracked: trackedModelIDs.contains(model.model.lowercased()),
+                            trackModel: trackModel
                         )
                         if model.id != models.last?.id {
                             Divider().overlay(Color.primary.opacity(0.08))
@@ -196,6 +200,8 @@ private struct ModelBreakdownHeader: View {
                 .frame(width: 74, alignment: .trailing)
             Text("Share")
                 .frame(width: 52, alignment: .trailing)
+            Color.clear
+                .frame(width: 24, height: 1)
         }
         .font(.caption.weight(.semibold))
         .foregroundStyle(.secondary)
@@ -209,6 +215,8 @@ struct ModelUsageRow: View {
     let maxUsage: Double
     let totalUsage: Double
     let formatter: MoneyFormatter
+    let isTracked: Bool
+    let trackModel: (String) -> Void
 
     var body: some View {
         VStack(spacing: 8) {
@@ -244,6 +252,17 @@ struct ModelUsageRow: View {
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
                     .frame(width: 52, alignment: .trailing)
+
+                Button {
+                    trackModel(model.model)
+                } label: {
+                    Image(systemName: isTracked ? "checkmark" : "plus")
+                        .font(.system(size: 10, weight: .bold))
+                        .frame(width: 20, height: 20)
+                }
+                .buttonStyle(.borderless)
+                .disabled(isTracked)
+                .help(isTracked ? "Price already tracked" : "Track this model's price")
             }
 
             GeometryReader { proxy in
@@ -278,9 +297,11 @@ struct ModelBreakdownCard_Previews: PreviewProvider {
                 ModelUsageSummary(model: "openai/gpt-4.1", providerName: "OpenAI", requests: 124, usage: 12.4, promptTokens: 120_000, completionTokens: 90_000, reasoningTokens: 0),
                 ModelUsageSummary(model: "anthropic/claude-sonnet-4", providerName: "Anthropic", requests: 88, usage: 9.8, promptTokens: 95_000, completionTokens: 76_000, reasoningTokens: 12_000)
             ],
+            trackedModelIDs: [],
             usesManagementKey: true,
             warning: nil,
-            formatter: MoneyFormatter(currency: .usd, usdToGBP: 0.79)
+            formatter: MoneyFormatter(currency: .usd, usdToGBP: 0.79),
+            trackModel: { _ in }
         )
         .padding()
         .frame(width: 660)

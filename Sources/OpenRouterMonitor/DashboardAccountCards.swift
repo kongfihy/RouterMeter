@@ -3,7 +3,7 @@ import OpenRouterMonitorCore
 
 struct BalanceHeroCard: View {
     let snapshot: UsageSnapshot?
-    let status: String
+    let hasActiveAlerts: Bool
     let formatter: MoneyFormatter
 
     var body: some View {
@@ -11,10 +11,17 @@ struct BalanceHeroCard: View {
             HStack(alignment: .top, spacing: 16) {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack(spacing: 8) {
-                        StatusPill(text: statusLabel, color: statusColor)
+                        Label("Account balance", systemImage: "creditcard")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+
                         Text(lastUpdatedText)
                             .font(.caption)
                             .foregroundStyle(.secondary)
+
+                        if hasActiveAlerts {
+                            StatusPill(text: "Budget alert", color: Brand.danger)
+                        }
                     }
 
                     Text(remainingText)
@@ -49,31 +56,11 @@ struct BalanceHeroCard: View {
             HStack(spacing: 12) {
                 MiniStat(label: "Total Credits", value: totalCreditsText)
                 MiniStat(label: "Used", value: usedText)
-                MiniStat(label: "Remaining", value: remainingText)
+                MiniStat(label: "All-Time Usage", value: allTimeUsageText)
             }
         }
         .padding(20)
         .brandedPanel(cornerRadius: 22)
-    }
-
-    private var statusLabel: String {
-        if status == "Refresh failed" {
-            return "Needs Attention"
-        }
-        if snapshot == nil {
-            return "Setup Needed"
-        }
-        return status == "Connected" ? "Healthy" : "Ready"
-    }
-
-    private var statusColor: Color {
-        if status == "Refresh failed" {
-            return Brand.danger
-        }
-        if progress < 0.15 {
-            return Brand.warning
-        }
-        return Brand.accentSecondary
     }
 
     private var remaining: Double? {
@@ -107,7 +94,10 @@ struct BalanceHeroCard: View {
     }
 
     private var progressColor: Color {
-        progress < 0.15 ? Brand.warning : Brand.accentSecondary
+        if hasActiveAlerts {
+            return Brand.danger
+        }
+        return progress < 0.15 ? Brand.warning : Brand.accentSecondary
     }
 
     private var remainingText: String {
@@ -120,6 +110,10 @@ struct BalanceHeroCard: View {
 
     private var usedText: String {
         money(used)
+    }
+
+    private var allTimeUsageText: String {
+        money(snapshot?.usageAllTimeIncludingBYOK)
     }
 
     private var percentText: String {
@@ -141,7 +135,9 @@ struct BalanceHeroCard: View {
 
     private var lastUpdatedText: String {
         guard let date = snapshot?.capturedAt else { return "Not refreshed yet" }
-        return "Updated \(date.formatted(date: .omitted, time: .shortened))"
+        let relativeFormatter = RelativeDateTimeFormatter()
+        relativeFormatter.unitsStyle = .full
+        return "Updated \(relativeFormatter.localizedString(for: date, relativeTo: Date()))"
     }
 
     private func money(_ value: Double?) -> String {
@@ -320,7 +316,7 @@ struct BalanceHeroCard_Previews: PreviewProvider {
                 totalCredits: 100,
                 accountTotalUsage: 32.5
             ),
-            status: "Connected",
+            hasActiveAlerts: false,
             formatter: MoneyFormatter(currency: .usd, usdToGBP: 0.79)
         )
         .padding()

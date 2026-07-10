@@ -16,8 +16,8 @@ struct MenuBarLabelView: View {
 
             Text(title)
         }
-            .onAppear {
-                store.startAutoRefresh()
+            .task {
+                await store.start()
             }
     }
 
