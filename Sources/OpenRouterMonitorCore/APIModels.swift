@@ -467,6 +467,37 @@ public struct ActivityUsageSummary: Codable, Equatable, Sendable {
         last30DaysUsage - last30DaysByokUsage
     }
 
+    public func usage(on date: Date) -> Double {
+        trend
+            .filter { Calendar.utc.isDate($0.date, inSameDayAs: date) }
+            .reduce(0) { $0 + $1.totalUsage }
+    }
+
+    public func requests(on date: Date) -> Int {
+        trend
+            .filter { Calendar.utc.isDate($0.date, inSameDayAs: date) }
+            .reduce(0) { $0 + $1.requests }
+    }
+
+    public func usage(inMonthContaining date: Date) -> Double {
+        trend
+            .filter { Calendar.utc.isDate($0.date, equalTo: date, toGranularity: .month) }
+            .reduce(0) { $0 + $1.totalUsage }
+    }
+
+    public func requests(inLastDays dayCount: Int, through referenceDate: Date) -> Int {
+        guard dayCount > 0 else { return 0 }
+        let calendar = Calendar.utc
+        let end = calendar.startOfDay(for: referenceDate)
+        let start = calendar.date(byAdding: .day, value: -(dayCount - 1), to: end) ?? end
+        return trend
+            .filter {
+                let itemDay = calendar.startOfDay(for: $0.date)
+                return itemDay >= start && itemDay <= end
+            }
+            .reduce(0) { $0 + $1.requests }
+    }
+
     public init(
         trend: [ActivityDaySummary],
         latestDate: Date?,
@@ -495,7 +526,10 @@ public struct ActivityUsageSummary: Codable, Equatable, Sendable {
         self.last30DaysTokens = last30DaysTokens
     }
 
-    public static func aggregate(activityItems: [OpenRouterActivityItem]) -> ActivityUsageSummary? {
+    public static func aggregate(
+        activityItems: [OpenRouterActivityItem],
+        referenceDate: Date = Date()
+    ) -> ActivityUsageSummary? {
         let datedItems = activityItems.compactMap { item -> (Date, OpenRouterActivityItem)? in
             guard let date = item.activityDate else { return nil }
             return (date, item)
@@ -537,15 +571,16 @@ public struct ActivityUsageSummary: Codable, Equatable, Sendable {
         }
 
         let calendar = Calendar.utc
-        let last7Start = calendar.date(byAdding: .day, value: -6, to: latestDate) ?? latestDate
-        let last30Start = calendar.date(byAdding: .day, value: -29, to: latestDate) ?? latestDate
+        let referenceDay = calendar.startOfDay(for: referenceDate)
+        let last7Start = calendar.date(byAdding: .day, value: -6, to: referenceDay) ?? referenceDay
+        let last30Start = calendar.date(byAdding: .day, value: -29, to: referenceDay) ?? referenceDay
 
         let latestDayItems = trend.filter { calendar.isDate($0.date, inSameDayAs: latestDate) }
-        let last7Items = trend.filter { $0.date >= last7Start && $0.date <= latestDate }
-        let last30Items = trend.filter { $0.date >= last30Start && $0.date <= latestDate }
+        let last7Items = trend.filter { $0.date >= last7Start && $0.date <= referenceDay }
+        let last30Items = trend.filter { $0.date >= last30Start && $0.date <= referenceDay }
 
-        let last7WindowDays = max(1, (calendar.dateComponents([.day], from: last7Start, to: latestDate).day ?? 0) + 1)
-        let last30WindowDays = max(1, (calendar.dateComponents([.day], from: last30Start, to: latestDate).day ?? 0) + 1)
+        let last7WindowDays = 7
+        let last30WindowDays = 30
 
         let latestDayUsage = latestDayItems.reduce(0) { $0 + $1.totalUsage }
         let latestDayByokUsage = latestDayItems.reduce(0) { $0 + $1.byokUsage }

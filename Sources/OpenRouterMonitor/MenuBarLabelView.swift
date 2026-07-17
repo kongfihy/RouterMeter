@@ -15,6 +15,8 @@ struct MenuBarLabelView: View {
                 .accessibilityHidden(true)
 
             Text(title)
+                .monospacedDigit()
+                .animatedNumericText(value: title)
         }
             .task {
                 await store.start()

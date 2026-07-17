@@ -7,6 +7,8 @@ PRODUCT_NAME="OpenRouterMonitor"
 CONFIGURATION="${CONFIGURATION:-release}"
 DISPLAY_NAME="${DISPLAY_NAME:-RouterMeter}"
 BUNDLE_IDENTIFIER="${BUNDLE_IDENTIFIER:-local.routermeter.mac}"
+APP_VERSION="${APP_VERSION:-0.3.0}"
+BUILD_NUMBER="${BUILD_NUMBER:-7}"
 DIST_DIR="${DIST_DIR:-$ROOT_DIR/dist}"
 APP_DIR="$DIST_DIR/$APP_NAME.app"
 CONTENTS_DIR="$APP_DIR/Contents"
@@ -63,9 +65,9 @@ cat > "$CONTENTS_DIR/Info.plist" <<PLIST
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>0.2.4</string>
+    <string>$APP_VERSION</string>
     <key>CFBundleVersion</key>
-    <string>6</string>
+    <string>$BUILD_NUMBER</string>
     <key>LSMinimumSystemVersion</key>
     <string>14.0</string>
     <key>LSUIElement</key>

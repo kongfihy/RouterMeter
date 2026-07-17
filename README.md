@@ -22,6 +22,8 @@ RouterMeter 基于开源项目 [OpenRouter Monitor](https://github.com/godsall-d
 - 只能看到按模型汇总后的统计，无法查看最近一次调用具体用了什么模型、花了多少钱。
 - 菜单栏一次只能显示余额、百分比或今日费用，无法同时看到今日费用和剩余余额。
 - 金额固定保留两位小数，MiMo 等低成本调用容易显示成 `$0.00`。
+- 没有当天调用时，“Today”可能继续显示最近一次活跃日的数据。
+- “最近 7 天请求数”按最后 7 个活跃日期计算；“This Month”在部分情况下实际是最近 30 天。
 - 原应用的名称、Bundle ID、Keychain 和本地缓存与改造版本共用，不适合长期独立使用。
 
 RouterMeter 保留了原项目的监控能力，并把重点放在更直接的费用查看和调用记录上。
@@ -54,6 +56,13 @@ $0.001943
 ```
 
 低成本模型不再因为四舍五入显示成零。
+
+### 更自然的 macOS 交互
+
+- 菜单栏窗口内容使用轻量淡入和短距离位移，不接管系统窗口动画。
+- Overview、Models、Activity 和 Logs 页面切换保留方向感，但避免网页式大幅滑动。
+- 余额、费用和请求数刷新时使用 SwiftUI 原生数字过渡。
+- 自动跟随 macOS“减少动态效果”辅助功能设置。
 
 ### 独立的 macOS 应用身份
 
@@ -155,7 +164,7 @@ swift run OpenRouterMonitorCoreChecks
 
 RouterMeter 基于 [godsall-dev/openrouter-usage-menu-macos](https://github.com/godsall-dev/openrouter-usage-menu-macos) 开发，并保留了原项目的 Git 历史。
 
-主要新增内容包括账户级本地日费用、组合菜单栏显示、Generation 日志浏览、请求详情、增量日志缓存、小额费用精度和独立应用身份。
+主要新增内容包括账户级本地日费用、组合菜单栏显示、Generation 日志浏览、请求详情、增量日志缓存、小额费用精度、日期统计修正、原生交互动效和独立应用身份。
 
 RouterMeter 与上游项目均使用 **GNU General Public License v3.0**。详见 [LICENSE](LICENSE)。
 

@@ -2,6 +2,7 @@ import SwiftUI
 import OpenRouterMonitorCore
 
 struct BalanceHeroCard: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let snapshot: UsageSnapshot?
     let hasActiveAlerts: Bool
     let formatter: MoneyFormatter
@@ -26,6 +27,7 @@ struct BalanceHeroCard: View {
 
                     Text(remainingText)
                         .font(.system(size: 44, weight: .semibold, design: .rounded))
+                        .animatedNumericText(value: remainingText)
                         .monospacedDigit()
                         .lineLimit(1)
                         .minimumScaleFactor(0.66)
@@ -41,6 +43,7 @@ struct BalanceHeroCard: View {
                 VStack(alignment: .trailing, spacing: 10) {
                     Text(percentText)
                         .font(.system(size: 28, weight: .semibold, design: .rounded))
+                        .animatedNumericText(value: percentText)
                         .monospacedDigit()
                     Text("remaining")
                         .font(.caption)
@@ -50,6 +53,7 @@ struct BalanceHeroCard: View {
 
             ProgressView(value: progress)
                 .tint(progressColor)
+                .animation(reduceMotion ? nil : RouterMotion.valueChange, value: progress)
                 .accessibilityLabel("Balance remaining")
                 .accessibilityValue(percentText)
 
@@ -150,6 +154,7 @@ struct UsageMetricGrid: View {
     let snapshot: UsageSnapshot?
     let localDayUsage: AnalyticsUsageSummary?
     let activitySummary: ActivityUsageSummary?
+    let usesManagementKey: Bool
     let burnDownSummary: CreditBurnDownSummary?
     let budget: BudgetSettings
     let formatter: MoneyFormatter
@@ -179,7 +184,7 @@ struct UsageMetricGrid: View {
             )
 
             UsageMetricCard(
-                title: activitySummary == nil ? "This Month" : "Last 30 Days",
+                title: "This Month",
                 value: money(monthSpend),
                 detail: averageDailyDetail,
                 systemImage: "chart.line.uptrend.xyaxis",
@@ -201,39 +206,48 @@ struct UsageMetricGrid: View {
         if let localDayUsage {
             return localDayUsage.usage
         }
+        if !usesManagementKey,
+           let snapshotUsage = sanitizedSnapshotUsage(snapshot?.usageDailyIncludingBYOK) {
+            return snapshotUsage
+        }
         if let activitySummary {
-            return activitySummary.latestDayUsage
+            return activitySummary.usage(on: Date())
         }
         return sanitizedSnapshotUsage(snapshot?.usageDailyIncludingBYOK)
     }
 
     private var sevenDaySpend: Double? {
-        if let activitySummary {
+        if usesManagementKey, let activitySummary {
             return activitySummary.last7DaysUsage
         }
-        return sanitizedSnapshotUsage(snapshot?.usageWeeklyIncludingBYOK)
+        if let snapshotUsage = sanitizedSnapshotUsage(snapshot?.usageWeeklyIncludingBYOK) {
+            return snapshotUsage
+        }
+        return activitySummary?.last7DaysUsage
     }
 
     private var monthSpend: Double? {
-        if let activitySummary {
-            return activitySummary.last30DaysUsage
+        if usesManagementKey, let activitySummary {
+            return activitySummary.usage(inMonthContaining: Date())
         }
-        return sanitizedSnapshotUsage(snapshot?.usageMonthlyIncludingBYOK)
+        if let snapshotUsage = sanitizedSnapshotUsage(snapshot?.usageMonthlyIncludingBYOK) {
+            return snapshotUsage
+        }
+        return activitySummary?.usage(inMonthContaining: Date())
     }
 
     private var todayRequests: Int? {
-        localDayUsage?.requestCount ?? activitySummary?.trend.last?.requests
+        if let localDayUsage {
+            return localDayUsage.requestCount
+        }
+        return activitySummary?.requests(on: Date())
     }
 
     private var sevenDayRequests: Int? {
-        guard let trend = activitySummary?.trend else { return nil }
-        return trend.suffix(7).reduce(0) { $0 + $1.requests }
+        activitySummary?.requests(inLastDays: 7, through: Date())
     }
 
     private var averageDailySpend: Double? {
-        if let activitySummary {
-            return activitySummary.last30DaysUsage / Double(max(activitySummary.last30WindowDays, 1))
-        }
         guard let monthSpend else { return nil }
         let day = max(1, Calendar.current.component(.day, from: Date()))
         return monthSpend / Double(day)

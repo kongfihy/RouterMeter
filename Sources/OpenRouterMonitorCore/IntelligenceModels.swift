@@ -60,7 +60,11 @@ public struct SpendForecastSummary: Codable, Equatable, Sendable {
         let monthToDateSpend = max(snapshot?.usageMonthlyIncludingBYOK ?? 0, activityMonthToDateSpend)
 
         let projectedMonthEndSpend = monthToDateSpend + (averageDailySpend * Double(daysRemaining))
-        let previous7DayAverage = previous7DayAverage(from: activitySummary, calendar: calendar)
+        let previous7DayAverage = previous7DayAverage(
+            from: activitySummary,
+            calendar: calendar,
+            referenceDate: now
+        )
         let paceChangeRatio = previous7DayAverage.flatMap { previousAverage in
             previousAverage > 0 ? (average7Day - previousAverage) / previousAverage : nil
         }
@@ -79,17 +83,21 @@ public struct SpendForecastSummary: Codable, Equatable, Sendable {
 
     private static func previous7DayAverage(
         from summary: ActivityUsageSummary,
-        calendar: Calendar
+        calendar: Calendar,
+        referenceDate: Date
     ) -> Double? {
-        guard let latestDate = summary.latestDate else { return nil }
+        let referenceDay = calendar.startOfDay(for: referenceDate)
         guard
-            let start = calendar.date(byAdding: .day, value: -13, to: latestDate),
-            let end = calendar.date(byAdding: .day, value: -7, to: latestDate)
+            let start = calendar.date(byAdding: .day, value: -13, to: referenceDay),
+            let end = calendar.date(byAdding: .day, value: -7, to: referenceDay)
         else {
             return nil
         }
 
-        let items = summary.trend.filter { $0.date >= start && $0.date <= end }
+        let items = summary.trend.filter {
+            let itemDay = calendar.startOfDay(for: $0.date)
+            return itemDay >= start && itemDay <= end
+        }
         guard !items.isEmpty else { return nil }
         return items.reduce(0) { $0 + $1.totalUsage } / 7
     }

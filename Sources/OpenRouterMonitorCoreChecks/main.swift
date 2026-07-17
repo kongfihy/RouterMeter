@@ -7,6 +7,7 @@ struct CoreChecks {
         try checkAPIDecoding()
         try checkAnalyticsModels()
         checkCalculations()
+        checkActivityDateWindows()
         checkAlertEvaluator()
         checkIntelligenceModels()
         try await checkClientKeyOnlySnapshot()
@@ -55,7 +56,10 @@ struct CoreChecks {
         expect(summaries[0].requests == 8, "activity request totals aggregate")
         expect(approximatelyEqual(summaries[0].usage, 0.039), "activity usage and BYOK totals aggregate")
 
-        let activityUsage = ActivityUsageSummary.aggregate(activityItems: activityResponse.data)
+        let activityUsage = ActivityUsageSummary.aggregate(
+            activityItems: activityResponse.data,
+            referenceDate: makeDate("2025-08-25T12:00:00Z")
+        )
         expect(approximatelyEqual(activityUsage?.latestDayUsage, 0.012), "latest day usage includes BYOK")
         expect(approximatelyEqual(activityUsage?.last7DaysUsage, 0.039), "last 7 day usage includes BYOK")
         expect(approximatelyEqual(activityUsage?.last30DaysByokUsage, 0.015), "last 30 day BYOK aggregate")
@@ -140,6 +144,34 @@ struct CoreChecks {
 
         let byokSnapshot = makeSnapshot(usageDaily: 1.25, byokUsageDaily: 0.75)
         expect(MenuBarTitleBuilder.title(snapshot: byokSnapshot, mode: .todaySpend, moneyFormatter: usd) == "OR $2.00 today", "today title includes BYOK")
+    }
+
+    private static func checkActivityDateWindows() {
+        let referenceDate = makeDate("2026-07-17T12:00:00Z")
+        let items = [
+            makeActivityItem(date: "2026-06-30", usage: 10, requests: 9),
+            makeActivityItem(date: "2026-07-01", usage: 4, requests: 40),
+            makeActivityItem(date: "2026-07-11", usage: 1, requests: 2),
+            makeActivityItem(date: "2026-07-16", usage: 2, requests: 3)
+        ]
+        let summary = ActivityUsageSummary.aggregate(
+            activityItems: items,
+            referenceDate: referenceDate
+        )
+
+        expect(approximatelyEqual(summary?.last7DaysUsage, 3), "last 7 days use a real calendar window")
+        expect(summary?.requests(inLastDays: 7, through: referenceDate) == 5, "last 7 day requests exclude older active days")
+        expect(approximatelyEqual(summary?.usage(inMonthContaining: referenceDate), 7), "month usage excludes the previous month")
+        expect(approximatelyEqual(summary?.usage(on: referenceDate), 0), "today usage does not reuse the last active day")
+        expect(summary?.requests(on: referenceDate) == 0, "today requests do not reuse the last active day")
+        expect(approximatelyEqual(summary?.latestDayUsage, 2), "latest activity remains available as a separate metric")
+
+        let staleSummary = ActivityUsageSummary.aggregate(
+            activityItems: [makeActivityItem(date: "2026-07-01", usage: 4, requests: 40)],
+            referenceDate: referenceDate
+        )
+        expect(approximatelyEqual(staleSummary?.last7DaysUsage, 0), "inactive accounts show zero usage for the current 7 day window")
+        expect(staleSummary?.last30WindowDays == 30, "rolling averages keep a full 30 day denominator")
     }
 
     private static func checkAlertEvaluator() {
@@ -697,6 +729,22 @@ private let modelsBody = Data("""
   ]
 }
 """.utf8)
+
+private func makeActivityItem(date: String, usage: Double, requests: Int) -> OpenRouterActivityItem {
+    OpenRouterActivityItem(
+        byokUsageInference: 0,
+        completionTokens: 0,
+        date: date,
+        endpointID: "endpoint-\(date)",
+        model: "test/model",
+        modelPermaslug: nil,
+        promptTokens: 0,
+        providerName: "Test",
+        reasoningTokens: 0,
+        requests: requests,
+        usage: usage
+    )
+}
 
 private func makeSnapshot(
     totalCredits: Double? = 100,

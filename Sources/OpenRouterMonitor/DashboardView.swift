@@ -3,7 +3,10 @@ import OpenRouterMonitorCore
 
 struct DashboardView: View {
     @EnvironmentObject private var store: MonitorStore
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var selectedSection: DashboardSection
+    @State private var navigationDirection: DashboardNavigationDirection = .forward
+    @State private var isDashboardVisible = false
 
     init(initialSection: DashboardSection = .overview) {
         _selectedSection = State(initialValue: initialSection)
@@ -12,7 +15,7 @@ struct DashboardView: View {
     var body: some View {
         VStack(spacing: 0) {
             AppHeader(
-                selectedSection: $selectedSection,
+                selectedSection: animatedSectionSelection,
                 statusText: store.connectionState.label,
                 statusColor: statusColor,
                 isRefreshing: store.isRefreshing
@@ -27,32 +30,97 @@ struct DashboardView: View {
                             .frame(height: 0)
                             .id("dashboard-top")
 
-                        switch selectedSection {
-                        case .overview:
-                            OverviewSection()
-                        case .models:
-                            ModelsSection()
-                        case .activity:
-                            ActivitySection()
-                        case .logs:
-                            GenerationLogsView()
+                        ZStack(alignment: .topLeading) {
+                            selectedSectionContent
+                                .id(selectedSection)
+                                .transition(sectionTransition)
                         }
+                        .frame(maxWidth: .infinity, alignment: .topLeading)
                     }
                     .padding(.horizontal, 20)
                     .padding(.vertical, 18)
                 }
                 .scrollIndicators(.visible)
                 .onChange(of: selectedSection) { _, _ in
-                    proxy.scrollTo("dashboard-top", anchor: .top)
+                    var transaction = Transaction()
+                    transaction.disablesAnimations = true
+                    withTransaction(transaction) {
+                        proxy.scrollTo("dashboard-top", anchor: .top)
+                    }
                 }
             }
         }
         .frame(width: 668, height: 732)
         .background(DashboardBackground())
+        .opacity(isDashboardVisible ? 1 : 0)
+        .offset(y: reduceMotion || isDashboardVisible ? 0 : -4)
         .foregroundStyle(.primary)
         .tint(Brand.accent)
+        .onAppear {
+            revealDashboard()
+        }
+        .onDisappear {
+            isDashboardVisible = false
+        }
         .task {
             await store.start()
+        }
+    }
+
+    private var animatedSectionSelection: Binding<DashboardSection> {
+        Binding(
+            get: { selectedSection },
+            set: { newSection in
+                guard newSection != selectedSection else { return }
+                navigationDirection = newSection.order > selectedSection.order ? .forward : .backward
+                if reduceMotion {
+                    selectedSection = newSection
+                } else {
+                    withAnimation(RouterMotion.sectionChange) {
+                        selectedSection = newSection
+                    }
+                }
+            }
+        )
+    }
+
+    @ViewBuilder
+    private var selectedSectionContent: some View {
+        switch selectedSection {
+        case .overview:
+            OverviewSection()
+        case .models:
+            ModelsSection()
+        case .activity:
+            ActivitySection()
+        case .logs:
+            GenerationLogsView()
+        }
+    }
+
+    private var sectionTransition: AnyTransition {
+        guard !reduceMotion else { return .opacity }
+        let offset: CGFloat = navigationDirection == .forward ? 10 : -10
+        let insertion = AnyTransition.modifier(
+            active: DashboardSectionMotionModifier(opacity: 0, xOffset: offset),
+            identity: DashboardSectionMotionModifier(opacity: 1, xOffset: 0)
+        )
+        return .asymmetric(
+            insertion: insertion,
+            removal: .opacity.animation(RouterMotion.quickFade)
+        )
+    }
+
+    private func revealDashboard() {
+        guard !isDashboardVisible else { return }
+        if reduceMotion {
+            isDashboardVisible = true
+            return
+        }
+        DispatchQueue.main.async {
+            withAnimation(RouterMotion.dashboardReveal) {
+                isDashboardVisible = true
+            }
         }
     }
 
@@ -72,6 +140,22 @@ struct DashboardView: View {
     }
 }
 
+private enum DashboardNavigationDirection {
+    case forward
+    case backward
+}
+
+private struct DashboardSectionMotionModifier: ViewModifier {
+    let opacity: Double
+    let xOffset: CGFloat
+
+    func body(content: Content) -> some View {
+        content
+            .opacity(opacity)
+            .offset(x: xOffset)
+    }
+}
+
 enum DashboardSection: String, CaseIterable, Identifiable {
     case overview
     case models
@@ -87,6 +171,10 @@ enum DashboardSection: String, CaseIterable, Identifiable {
         case .activity: return "Activity"
         case .logs: return "Logs"
         }
+    }
+
+    var order: Int {
+        Self.allCases.firstIndex(of: self) ?? 0
     }
 
     var icon: String {
@@ -114,6 +202,7 @@ private struct OverviewSection: View {
                 snapshot: store.latestSnapshot,
                 localDayUsage: store.currentLocalDayUsage,
                 activitySummary: store.activityUsageSummary,
+                usesManagementKey: store.state.profile.isManagementKey,
                 burnDownSummary: store.burnDownSummary,
                 budget: store.state.budget,
                 formatter: store.moneyFormatter

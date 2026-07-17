@@ -1,12 +1,15 @@
 import SwiftUI
 
 struct StatusPill: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let text: String
     let color: Color
 
     var body: some View {
         Text(text)
             .font(.caption.weight(.semibold))
+            .contentTransition(.opacity)
+            .animation(reduceMotion ? nil : RouterMotion.quickFade, value: text)
             .lineLimit(1)
             .padding(.horizontal, 9)
             .padding(.vertical, 5)
@@ -65,6 +68,7 @@ struct UsageMetricCard: View {
             Text(value)
                 .font(.title3.weight(.semibold))
                 .monospacedDigit()
+                .animatedNumericText(value: value)
                 .lineLimit(1)
                 .minimumScaleFactor(0.72)
                 .foregroundStyle(isUnavailable ? .secondary : .primary)
@@ -93,6 +97,7 @@ struct MiniStat: View {
             Text(value)
                 .font(.caption.weight(.semibold))
                 .monospacedDigit()
+                .animatedNumericText(value: value)
                 .lineLimit(1)
                 .minimumScaleFactor(0.75)
         }
@@ -119,6 +124,7 @@ struct SmallMetric: View {
             Text(value)
                 .font(.caption.weight(.semibold))
                 .monospacedDigit()
+                .animatedNumericText(value: value)
         }
     }
 }

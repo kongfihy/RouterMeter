@@ -40,6 +40,7 @@ struct AppHeader: View {
 }
 
 struct AppToolbar: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let isRefreshing: Bool
     let refresh: () async -> Void
 
@@ -50,15 +51,20 @@ struct AppToolbar: View {
                     await refresh()
                 }
             } label: {
-                if isRefreshing {
-                    ProgressView()
-                        .controlSize(.small)
-                        .frame(width: 16, height: 16)
-                        .accessibilityLabel("Refreshing OpenRouter data")
-                } else {
-                    Image(systemName: "arrow.clockwise")
-                        .accessibilityLabel("Refresh OpenRouter data")
+                ZStack {
+                    if isRefreshing {
+                        ProgressView()
+                            .controlSize(.small)
+                            .transition(.opacity)
+                            .accessibilityLabel("Refreshing OpenRouter data")
+                    } else {
+                        Image(systemName: "arrow.clockwise")
+                            .transition(.opacity)
+                            .accessibilityLabel("Refresh OpenRouter data")
+                    }
                 }
+                .frame(width: 16, height: 16)
+                .animation(reduceMotion ? nil : RouterMotion.quickFade, value: isRefreshing)
             }
             .disabled(isRefreshing)
             .help(isRefreshing ? "Refreshing" : "Refresh now")
