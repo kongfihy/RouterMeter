@@ -5,13 +5,16 @@ import OpenRouterMonitorCore
 struct CoreChecks {
     static func main() async throws {
         try checkAPIDecoding()
+        try checkAnalyticsModels()
         checkCalculations()
         checkAlertEvaluator()
         checkIntelligenceModels()
         try await checkClientKeyOnlySnapshot()
         try await checkClientManagementCreditsSnapshot()
         try await checkClientModels()
+        try await checkClientGenerationLogs()
         await checkClientHTTPFailures()
+        await checkClientRejectedRequestMessage()
         await checkMalformedResponse()
         await checkTransportFailure()
         print("All OpenRouterMonitorCore checks passed.")
@@ -67,6 +70,50 @@ struct CoreChecks {
         expect((burnDown?.estimatedDaysRemaining ?? 0) > 0, "burn down days remaining")
     }
 
+    private static func checkAnalyticsModels() throws {
+        let metadata = try JSONDecoder().decode(AnalyticsMetadataResponse.self, from: analyticsMetadataBody)
+        expect(metadata.data.metrics.contains { $0.name == "total_usage" }, "analytics metadata metrics decode")
+        expect(metadata.data.dimensions.contains { $0.name == "generation_id" }, "analytics metadata dimensions decode")
+        expect(metadata.data.granularities.contains { $0.name == "minute" }, "analytics granularities decode")
+
+        let response = try JSONDecoder().decode(AnalyticsQueryResponse.self, from: analyticsQueryBody)
+        expect(response.data.metadata.rowCount == 1, "analytics response metadata decodes")
+        let logs = GenerationLogParser.parse(
+            rows: response.data.data,
+            generationDimension: "generation_id",
+            modelDimension: "model",
+            costMetric: "total_usage",
+            promptMetric: "prompt_tokens",
+            completionMetric: "completion_tokens",
+            reasoningMetric: "reasoning_tokens"
+        )
+        expect(logs.count == 1, "generation rows parse")
+        expect(logs[0].generationID == "gen-test-123", "generation id parses")
+        expect(logs[0].model == "openai/gpt-4.1", "generation model parses")
+        expect(approximatelyEqual(logs[0].totalCost, 0.0125), "generation cost parses")
+        expect(logs[0].promptTokens == 1200, "generation prompt tokens parse")
+        expect(logs[0].completionTokens == 300, "generation completion tokens parse")
+        expect(logs[0].reasoningTokens == 50, "generation reasoning tokens parse")
+        expect(logs[0].occurredAt != nil, "generation time bucket parses")
+
+        let query = AnalyticsQueryRequest(
+            metrics: ["total_usage", "request_count"],
+            dimensions: ["generation_id"],
+            granularity: nil,
+            timeRange: AnalyticsTimeRange(
+                start: makeDate("2026-07-16T00:00:00Z"),
+                end: makeDate("2026-07-17T00:00:00Z")
+            ),
+            limit: 25,
+            orderBy: AnalyticsOrderBy(field: "total_usage")
+        )
+        let encoded = try JSONEncoder().encode(query)
+        let body = try JSONSerialization.jsonObject(with: encoded) as? [String: Any]
+        expect((body?["dimensions"] as? [String]) == ["generation_id"], "generation query uses one lightweight dimension")
+        expect(body?["granularity"] == nil, "generation query omits time granularity")
+        expect((body?["limit"] as? Int) == 25, "generation query uses requested limit")
+    }
+
     private static func checkCalculations() {
         let snapshot = makeSnapshot(totalCredits: 100, accountTotalUsage: 25, usageDaily: 1.25)
         let usd = MoneyFormatter(currency: .usd, usdToGBP: 0.8)
@@ -76,9 +123,20 @@ struct CoreChecks {
         expect(snapshot.accountPercentRemaining == 0.75, "percent remaining computes")
         expect(usd.string(fromUSDCredits: 12.5) == "$12.50", "USD formatting")
         expect(gbp.string(fromUSDCredits: 12.5) == "£10.00", "GBP formatting")
+        expect(usd.detailedUsageString(fromUSDCredits: 0.00194278) == "$0.001943", "small usage keeps useful precision")
+        expect(usd.detailedUsageString(fromUSDCredits: 0) == "$0.00", "zero usage remains compact")
         expect(MenuBarTitleBuilder.title(snapshot: snapshot, mode: .balanceRemaining, moneyFormatter: usd) == "OR $75.00", "balance title")
         expect(MenuBarTitleBuilder.title(snapshot: snapshot, mode: .percentRemaining, moneyFormatter: usd) == "OR 75%", "percent title")
         expect(MenuBarTitleBuilder.title(snapshot: snapshot, mode: .todaySpend, moneyFormatter: usd) == "OR $1.25 today", "today title")
+        expect(
+            MenuBarTitleBuilder.title(
+                snapshot: snapshot,
+                mode: .todayAndBalance,
+                moneyFormatter: usd,
+                todaySpendOverride: 2.5
+            ) == "OR $2.50 · $75.00",
+            "combined today and balance title"
+        )
 
         let byokSnapshot = makeSnapshot(usageDaily: 1.25, byokUsageDaily: 0.75)
         expect(MenuBarTitleBuilder.title(snapshot: byokSnapshot, mode: .todaySpend, moneyFormatter: usd) == "OR $2.00 today", "today title includes BYOK")
@@ -276,6 +334,50 @@ struct CoreChecks {
         expect(models[1].canonicalSlug == "anthropic/claude-sonnet-4-20250514", "client decodes canonical slug")
     }
 
+    private static func checkClientGenerationLogs() async throws {
+        let client = OpenRouterClient(baseURL: URL(string: "https://example.test")!, urlSession: makeSession { request in
+            switch request.url?.path {
+            case "/analytics/meta":
+                return response(statusCode: 200, body: analyticsMetadataBody)
+            case "/analytics/query":
+                expect(request.httpMethod == "POST", "analytics query uses POST")
+                if let bodyData = requestBodyData(request),
+                   let body = try? JSONSerialization.jsonObject(with: bodyData) as? [String: Any] {
+                    expect((body["limit"] as? Int) == 500, "generation query expands candidate pool")
+                    let orderBy = body["order_by"] as? [String: Any]
+                    expect(orderBy?["field"] as? String == "total_usage", "generation query uses stable cost ordering")
+                } else {
+                    fail("generation query body decodes")
+                }
+                return response(statusCode: 200, body: analyticsGenerationOnlyBody)
+            case "/generation":
+                expect(request.url?.query?.contains("id=gen-1784297011-XPD4DdqnnS8IV7g9EMyi") == true, "generation detail sends id")
+                return response(statusCode: 200, body: generationDetailBody)
+            default:
+                return response(statusCode: 404, body: Data())
+            }
+        })
+
+        let logs = try await client.fetchRecentGenerationLogs(
+            apiKey: "sk-test",
+            since: makeDate("2026-07-16T00:00:00Z"),
+            until: makeDate("2026-07-17T00:00:00Z"),
+            limit: 2
+        )
+        expect(logs.count == 2, "client applies requested generation log limit")
+        expect(logs[0].model == "Unknown model", "lightweight generation query defers model details")
+        expect(logs[0].generationID == "gen-stt-1784300611-recent", "client sorts candidates by embedded timestamp")
+        expect(logs[0].occurredAt == makeDate("2026-07-17T15:03:31Z"), "prefixed generation id supplies fallback timestamp")
+        expect(logs[1].generationID == "gen-1784297011-XPD4DdqnnS8IV7g9EMyi", "second newest generation is retained")
+
+        let detail = try await client.fetchGeneration(
+            apiKey: "sk-test",
+            id: "gen-1784297011-XPD4DdqnnS8IV7g9EMyi"
+        )
+        expect(detail.model == "google/gemini-3.1-pro-preview-20260219", "generation detail model decodes")
+        expect(detail.providerName == "Google", "generation detail provider decodes")
+    }
+
     private static func checkClientHTTPFailures() async {
         let cases: [(Int, OpenRouterClientError)] = [
             (401, .unauthorized),
@@ -297,6 +399,27 @@ struct CoreChecks {
             } catch {
                 fail("Unexpected error: \(error)")
             }
+        }
+    }
+
+    private static func checkClientRejectedRequestMessage() async {
+        let body = Data("""
+        {"error":{"message":"Minute granularity is limited to a 3-hour time range.","code":400}}
+        """.utf8)
+        let client = OpenRouterClient(baseURL: URL(string: "https://example.test")!, urlSession: makeSession { _ in
+            response(statusCode: 400, body: body)
+        })
+
+        do {
+            _ = try await client.fetchKey(apiKey: "sk-test")
+            fail("Expected rejected request error")
+        } catch let error as OpenRouterClientError {
+            expect(
+                error.errorDescription?.contains("Minute granularity is limited") == true,
+                "HTTP error body is preserved"
+            )
+        } catch {
+            fail("Unexpected error: \(error)")
         }
     }
 
@@ -336,6 +459,100 @@ struct CoreChecks {
         }
     }
 }
+
+private let analyticsMetadataBody = Data("""
+{
+  "data": {
+    "metrics": [
+      {"name": "total_usage", "display_label": "Total Usage"},
+      {"name": "request_count", "display_label": "Requests"}
+    ],
+    "dimensions": [
+      {"name": "generation_id", "display_label": "Generation ID"},
+      {"name": "model", "display_label": "Model"}
+    ],
+    "granularities": [
+      {"name": "minute", "display_label": "Minute"},
+      {"name": "hour", "display_label": "Hour"}
+    ]
+  }
+}
+""".utf8)
+
+private let analyticsQueryBody = Data("""
+{
+  "data": {
+    "data": [
+      {
+        "generation_id": "gen-test-123",
+        "model": "openai/gpt-4.1",
+        "minute": "2026-07-17T08:30:00Z",
+        "total_usage": 0.0125,
+        "prompt_tokens": 1200,
+        "completion_tokens": 300,
+        "reasoning_tokens": 50,
+        "request_count": 1
+      }
+    ],
+    "metadata": {
+      "query_time_ms": 12.5,
+      "row_count": 1,
+      "truncated": false
+    },
+    "warnings": []
+  }
+}
+""".utf8)
+
+private let analyticsGenerationOnlyBody = Data("""
+{
+  "data": {
+    "data": [
+      {
+        "generation_id": "gen-1784200000-expensive-old",
+        "total_usage": 1.5,
+        "request_count": "1"
+      },
+      {
+        "generation_id": "gen-1784297011-XPD4DdqnnS8IV7g9EMyi",
+        "total_usage": 0.206438,
+        "request_count": "1"
+      },
+      {
+        "generation_id": "gen-stt-1784300611-recent",
+        "total_usage": 0.0001,
+        "request_count": "1"
+      }
+    ],
+    "metadata": {
+      "query_time_ms": 466,
+      "row_count": 3,
+      "truncated": false
+    }
+  }
+}
+""".utf8)
+
+private let generationDetailBody = Data("""
+{
+  "data": {
+    "id": "gen-1784297011-XPD4DdqnnS8IV7g9EMyi",
+    "created_at": "2026-07-17T14:03:31.655Z",
+    "model": "google/gemini-3.1-pro-preview-20260219",
+    "provider_name": "Google",
+    "total_cost": 0.206438,
+    "tokens_prompt": 945,
+    "tokens_completion": 4835,
+    "native_tokens_reasoning": 12683,
+    "latency": 3336,
+    "generation_time": 91033,
+    "finish_reason": "stop",
+    "cancelled": false,
+    "streamed": true,
+    "is_byok": false
+  }
+}
+""".utf8)
 
 private let keyBody = Data("""
 {
@@ -527,6 +744,23 @@ private func makeSession(handler: @escaping @Sendable (URLRequest) throws -> (HT
     let configuration = URLSessionConfiguration.ephemeral
     configuration.protocolClasses = [URLProtocolMock.self]
     return URLSession(configuration: configuration)
+}
+
+private func requestBodyData(_ request: URLRequest) -> Data? {
+    if let body = request.httpBody { return body }
+    guard let stream = request.httpBodyStream else { return nil }
+
+    stream.open()
+    defer { stream.close() }
+    var data = Data()
+    var buffer = [UInt8](repeating: 0, count: 4_096)
+    while stream.hasBytesAvailable {
+        let count = stream.read(&buffer, maxLength: buffer.count)
+        guard count >= 0 else { return nil }
+        if count == 0 { break }
+        data.append(buffer, count: count)
+    }
+    return data
 }
 
 private func response(statusCode: Int, body: Data) -> (HTTPURLResponse, Data) {

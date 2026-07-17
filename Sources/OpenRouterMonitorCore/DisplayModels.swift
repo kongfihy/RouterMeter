@@ -4,6 +4,7 @@ public enum MenuBarDisplayMode: String, CaseIterable, Codable, Sendable {
     case balanceRemaining
     case percentRemaining
     case todaySpend
+    case todayAndBalance
 
     public var label: String {
         switch self {
@@ -13,6 +14,8 @@ public enum MenuBarDisplayMode: String, CaseIterable, Codable, Sendable {
             return "Percent"
         case .todaySpend:
             return "Today"
+        case .todayAndBalance:
+            return "Today + Balance"
         }
     }
 }
@@ -57,13 +60,38 @@ public struct MoneyFormatter: Sendable {
         let converted = displayAmount(fromUSDCredits: amount)
         return "\(currency.symbol)\(converted.formatted(.number.precision(.fractionLength(2))))"
     }
+
+    public func detailedUsageString(fromUSDCredits amount: Double) -> String {
+        let converted = displayAmount(fromUSDCredits: amount)
+        let absoluteAmount = abs(converted)
+        let maximumFractionDigits: Int
+
+        switch absoluteAmount {
+        case 1...:
+            maximumFractionDigits = 2
+        case 0.01...:
+            maximumFractionDigits = 4
+        case 0.0001...:
+            maximumFractionDigits = 6
+        case 0 where converted == 0:
+            maximumFractionDigits = 2
+        default:
+            maximumFractionDigits = 8
+        }
+
+        let value = converted.formatted(
+            .number.precision(.fractionLength(2...maximumFractionDigits))
+        )
+        return "\(currency.symbol)\(value)"
+    }
 }
 
 public struct MenuBarTitleBuilder: Sendable {
     public static func title(
         snapshot: UsageSnapshot?,
         mode: MenuBarDisplayMode,
-        moneyFormatter: MoneyFormatter
+        moneyFormatter: MoneyFormatter,
+        todaySpendOverride: Double? = nil
     ) -> String {
         guard let snapshot else { return "OR -" }
 
@@ -86,7 +114,15 @@ public struct MenuBarTitleBuilder: Sendable {
             let percent = max(0, min(1, remaining / limit))
             return "OR \((percent * 100).formatted(.number.precision(.fractionLength(0))))%"
         case .todaySpend:
-            return "OR \(moneyFormatter.string(fromUSDCredits: snapshot.usageDailyIncludingBYOK)) today"
+            let today = todaySpendOverride ?? snapshot.usageDailyIncludingBYOK
+            return "OR \(moneyFormatter.string(fromUSDCredits: today)) today"
+        case .todayAndBalance:
+            let today = todaySpendOverride ?? snapshot.usageDailyIncludingBYOK
+            let remaining = snapshot.accountRemainingCredits ?? snapshot.keyLimitRemaining
+            guard let remaining else {
+                return "OR \(moneyFormatter.string(fromUSDCredits: today)) today"
+            }
+            return "OR \(moneyFormatter.string(fromUSDCredits: today)) · \(moneyFormatter.string(fromUSDCredits: remaining))"
         }
     }
 }

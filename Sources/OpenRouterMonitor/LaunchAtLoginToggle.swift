@@ -7,7 +7,7 @@ struct LaunchAtLoginToggle: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Toggle("Launch OpenRouter Monitor at login", isOn: launchBinding)
+            Toggle("Launch RouterMeter at login", isOn: launchBinding)
 
             HStack(spacing: 8) {
                 Text(statusText)

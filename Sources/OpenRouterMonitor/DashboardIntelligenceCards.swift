@@ -119,7 +119,7 @@ struct ModelWatchView: View {
                     .foregroundStyle(Brand.accentSecondary)
                     .padding(.vertical, 16)
 
-                Text("OpenRouter Monitor compares each refreshed catalog snapshot with the previous one.")
+                Text("RouterMeter compares each refreshed catalog snapshot with the previous one.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } else {

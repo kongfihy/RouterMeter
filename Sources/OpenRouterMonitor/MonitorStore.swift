@@ -26,6 +26,12 @@ struct AppConfiguration: Codable, Equatable {
     var activeKeyHealthIssueIDsOverride: [String]?
     var spendPaceAlertActiveOverride: Bool?
     var lastFailureNotificationAt: Date?
+    var generationLogsEnabledOverride: Bool?
+    var generationLogLookbackHoursOverride: Int?
+    var generationLogLimitOverride: Int?
+    var lastGenerationLogRefreshAt: Date?
+    var lastGenerationLogError: String?
+    var lastLocalDayUsageError: String?
 
     var selectedCurrency: DisplayCurrency {
         get { DisplayCurrency(rawValue: selectedCurrencyRawValue) ?? .usd }
@@ -92,6 +98,21 @@ struct AppConfiguration: Codable, Equatable {
         set { activeKeyHealthIssueIDsOverride = newValue.sorted() }
     }
 
+    var generationLogsEnabled: Bool {
+        get { generationLogsEnabledOverride ?? true }
+        set { generationLogsEnabledOverride = newValue }
+    }
+
+    var generationLogLookbackHours: Int {
+        get { generationLogLookbackHoursOverride ?? 24 }
+        set { generationLogLookbackHoursOverride = min(168, max(1, newValue)) }
+    }
+
+    var generationLogLimit: Int {
+        get { generationLogLimitOverride ?? 100 }
+        set { generationLogLimitOverride = min(500, max(10, newValue)) }
+    }
+
     var spendPaceAlertActive: Bool {
         get { spendPaceAlertActiveOverride ?? false }
         set { spendPaceAlertActiveOverride = newValue }
@@ -118,10 +139,28 @@ struct CapturedGeneration: Codable, Equatable, Identifiable {
     var id: String { generationID }
     var generationID: String
     var capturedAt: Date
+    var occurredAt: Date?
     var model: String
+    var providerName: String?
     var totalCost: Double
     var promptTokens: Int
     var completionTokens: Int
+    var reasoningTokens: Int?
+    var latencySeconds: Double?
+    var generationTimeSeconds: Double?
+    var finishReason: String?
+    var cancelled: Bool?
+    var streamed: Bool?
+    var isBYOK: Bool?
+
+    var displayDate: Date { occurredAt ?? capturedAt }
+    var totalTokens: Int { promptTokens + completionTokens + (reasoningTokens ?? 0) }
+
+    var statusLabel: String {
+        if cancelled == true { return "Cancelled" }
+        if let finishReason, !finishReason.isEmpty { return finishReason }
+        return "Completed"
+    }
 }
 
 struct TrackedModelPricingRow: Equatable, Identifiable {
@@ -140,6 +179,7 @@ struct PersistedMonitorState: Codable, Equatable {
     var snapshots: [UsageSnapshot] = []
     var activityItems: [OpenRouterActivityItem] = []
     var apiKeys: [OpenRouterAPIKey] = []
+    var localDayUsage: AnalyticsUsageSummary?
     var trackedModels: [OpenRouterModel] = []
     var capturedGenerations: [CapturedGeneration] = []
     var modelCatalogChanges: [ModelCatalogChange] = []
@@ -154,6 +194,7 @@ struct PersistedMonitorState: Codable, Equatable {
         snapshots = try container.decodeIfPresent([UsageSnapshot].self, forKey: .snapshots) ?? []
         activityItems = try container.decodeIfPresent([OpenRouterActivityItem].self, forKey: .activityItems) ?? []
         apiKeys = try container.decodeIfPresent([OpenRouterAPIKey].self, forKey: .apiKeys) ?? []
+        localDayUsage = try container.decodeIfPresent(AnalyticsUsageSummary.self, forKey: .localDayUsage)
         trackedModels = try container.decodeIfPresent([OpenRouterModel].self, forKey: .trackedModels) ?? []
         capturedGenerations = try container.decodeIfPresent([CapturedGeneration].self, forKey: .capturedGenerations) ?? []
         modelCatalogChanges = try container.decodeIfPresent([ModelCatalogChange].self, forKey: .modelCatalogChanges) ?? []
@@ -182,9 +223,12 @@ enum MonitorConnectionState: Equatable {
 
 @MainActor
 final class MonitorStore: ObservableObject {
+    static let shared = MonitorStore()
+
     @Published var state: PersistedMonitorState
     @Published var isRefreshing = false
     @Published var isRefreshingModelPrices = false
+    @Published var isRefreshingGenerationLogs = false
     @Published var isValidatingAPIKey = false
     @Published var apiKeyValidationMessage: String?
     @Published var apiKeyValidationSucceeded = false
@@ -206,6 +250,12 @@ final class MonitorStore: ObservableObject {
 
     var latestSnapshot: UsageSnapshot? {
         state.snapshots.sorted { $0.capturedAt > $1.capturedAt }.first
+    }
+
+    var currentLocalDayUsage: AnalyticsUsageSummary? {
+        guard let summary = state.localDayUsage,
+              Calendar.current.isDate(summary.periodStart, inSameDayAs: Date()) else { return nil }
+        return summary
     }
 
     var connectionState: MonitorConnectionState {
@@ -274,6 +324,10 @@ final class MonitorStore: ObservableObject {
         state.modelCatalogChanges.sorted { $0.detectedAt > $1.detectedAt }
     }
 
+    var sortedCapturedGenerations: [CapturedGeneration] {
+        state.capturedGenerations.sorted { $0.displayDate > $1.displayDate }
+    }
+
     var sortedAPIKeys: [OpenRouterAPIKey] {
         state.apiKeys.sorted {
             if $0.totalUsageMonthly == $1.totalUsageMonthly {
@@ -322,9 +376,14 @@ final class MonitorStore: ObservableObject {
     }
 
     func start() async {
-        startAutoRefresh()
         guard !hasStarted else { return }
         hasStarted = true
+
+        if ProcessInfo.processInfo.environment["ROUTERMETER_DISABLE_NETWORK"] == "1" {
+            return
+        }
+
+        startAutoRefresh()
 
         if state.profile.hasStoredKey {
             await refresh()
@@ -490,6 +549,25 @@ final class MonitorStore: ObservableObject {
             state.configuration.lastRefreshError = outcome.optionalDataWarning
             state.configuration.lastFailureNotificationAt = nil
 
+            if state.profile.isManagementKey {
+                let now = Date()
+                let startOfLocalDay = Calendar.current.startOfDay(for: now)
+                do {
+                    state.localDayUsage = try await client.fetchUsageSummary(
+                        apiKey: apiKey,
+                        start: startOfLocalDay,
+                        end: now
+                    )
+                    state.configuration.lastLocalDayUsageError = nil
+                } catch {
+                    state.configuration.lastLocalDayUsageError = (error as? LocalizedError)?.errorDescription
+                        ?? error.localizedDescription
+                }
+            } else {
+                state.localDayUsage = nil
+                state.configuration.lastLocalDayUsageError = nil
+            }
+
             let keyHealth = KeyHealthSummary.make(
                 snapshot: outcome.snapshot,
                 apiKeys: outcome.apiKeys,
@@ -520,6 +598,9 @@ final class MonitorStore: ObservableObject {
             if shouldSendSpendPaceAlert, let forecast {
                 await sendSpendPaceNotification(forecast)
             }
+            if state.profile.isManagementKey, state.configuration.generationLogsEnabled {
+                await refreshGenerationLogs(force: false)
+            }
         } catch {
             state.configuration.lastRefreshStatus = "Refresh failed"
             state.configuration.lastRefreshError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
@@ -533,6 +614,142 @@ final class MonitorStore: ObservableObject {
                 await sendFailureNotification(message: state.configuration.lastRefreshError ?? "Refresh failed.")
             }
         }
+    }
+
+    func clearGenerationLogs() {
+        state.capturedGenerations = []
+        state.configuration.lastGenerationLogRefreshAt = nil
+        state.configuration.lastGenerationLogError = nil
+        save()
+    }
+
+    func refreshGenerationLogs(force: Bool = true) async {
+        guard state.profile.isManagementKey else {
+            state.configuration.lastGenerationLogError = "A Management API key is required for detailed logs."
+            save()
+            return
+        }
+        guard state.configuration.generationLogsEnabled else { return }
+        if !force, let lastRefresh = state.configuration.lastGenerationLogRefreshAt {
+            let minimumInterval = max(state.configuration.refreshIntervalMinutes * 60, 900)
+            guard Date().timeIntervalSince(lastRefresh) >= minimumInterval else { return }
+        }
+        guard !isRefreshingGenerationLogs else { return }
+
+        isRefreshingGenerationLogs = true
+        defer { isRefreshingGenerationLogs = false }
+
+        do {
+            let apiKey = try keychain.loadAPIKey() ?? ""
+            let since = Calendar.current.date(
+                byAdding: .hour,
+                value: -state.configuration.generationLogLookbackHours,
+                to: Date()
+            ) ?? Date().addingTimeInterval(-86_400)
+            let summaries = try await client.fetchRecentGenerationLogs(
+                apiKey: apiKey,
+                since: since,
+                limit: state.configuration.generationLogLimit
+            )
+            let existingByID = Dictionary(
+                uniqueKeysWithValues: state.capturedGenerations.map { ($0.generationID, $0) }
+            )
+            let capturedAt = Date()
+            let merged = summaries.map { summary in
+                let existing = existingByID[summary.generationID]
+                return CapturedGeneration(
+                    generationID: summary.generationID,
+                    capturedAt: existing?.capturedAt ?? capturedAt,
+                    occurredAt: summary.occurredAt ?? existing?.occurredAt,
+                    model: summary.model == "Unknown model" ? (existing?.model ?? summary.model) : summary.model,
+                    providerName: existing?.providerName,
+                    totalCost: summary.totalCost > 0 ? summary.totalCost : (existing?.totalCost ?? 0),
+                    promptTokens: summary.promptTokens > 0 ? summary.promptTokens : (existing?.promptTokens ?? 0),
+                    completionTokens: summary.completionTokens > 0 ? summary.completionTokens : (existing?.completionTokens ?? 0),
+                    reasoningTokens: summary.reasoningTokens > 0 ? summary.reasoningTokens : existing?.reasoningTokens,
+                    latencySeconds: existing?.latencySeconds,
+                    generationTimeSeconds: existing?.generationTimeSeconds,
+                    finishReason: existing?.finishReason,
+                    cancelled: existing?.cancelled,
+                    streamed: existing?.streamed,
+                    isBYOK: existing?.isBYOK
+                )
+            }
+
+            let mergedIDs = Set(merged.map(\.generationID))
+            let retained = state.capturedGenerations.filter { !mergedIDs.contains($0.generationID) }
+            state.capturedGenerations = Array(
+                (merged + retained)
+                    .sorted { $0.displayDate > $1.displayDate }
+                    .prefix(500)
+            )
+
+            // Hydrate only rows returned by this refresh that are new or still
+            // incomplete. Once cached, older details are not requested again.
+            let detailIDs = summaries.compactMap { summary -> String? in
+                guard let existing = existingByID[summary.generationID] else {
+                    return summary.generationID
+                }
+                return existing.model == "Unknown model" || existing.providerName == nil
+                    ? summary.generationID
+                    : nil
+            }
+            let details = await client.fetchGenerations(
+                apiKey: apiKey,
+                ids: detailIDs,
+                maximumConcurrentRequests: 8
+            )
+            for detail in details {
+                mergeGenerationDetail(detail)
+            }
+
+            state.configuration.lastGenerationLogRefreshAt = capturedAt
+            state.configuration.lastGenerationLogError = nil
+            save()
+        } catch {
+            state.configuration.lastGenerationLogError = (error as? LocalizedError)?.errorDescription
+                ?? error.localizedDescription
+            save()
+        }
+    }
+
+    func loadGenerationDetails(id: String) async {
+        guard state.profile.isManagementKey else { return }
+        guard let index = state.capturedGenerations.firstIndex(where: { $0.generationID == id }) else { return }
+
+        do {
+            let apiKey = try keychain.loadAPIKey() ?? ""
+            let generation = try await client.fetchGeneration(apiKey: apiKey, id: id)
+            mergeGenerationDetail(generation, preferredIndex: index)
+            save()
+        } catch {
+            state.configuration.lastGenerationLogError = (error as? LocalizedError)?.errorDescription
+                ?? error.localizedDescription
+            save()
+        }
+    }
+
+    private func mergeGenerationDetail(
+        _ generation: OpenRouterGeneration,
+        preferredIndex: Int? = nil
+    ) {
+        guard let index = preferredIndex
+            ?? state.capturedGenerations.firstIndex(where: { $0.generationID == generation.id }) else { return }
+        var item = state.capturedGenerations[index]
+        item.occurredAt = generation.parsedCreatedAt ?? item.occurredAt
+        item.model = generation.model ?? item.model
+        item.providerName = generation.providerName ?? item.providerName
+        item.totalCost = generation.totalCost ?? generation.usage ?? item.totalCost
+        item.promptTokens = generation.tokensPrompt ?? item.promptTokens
+        item.completionTokens = generation.tokensCompletion ?? item.completionTokens
+        item.reasoningTokens = generation.nativeTokensReasoning ?? item.reasoningTokens
+        item.latencySeconds = generation.latency.map { $0 / 1_000 }
+        item.generationTimeSeconds = generation.generationTime.map { $0 / 1_000 }
+        item.finishReason = generation.finishReason ?? generation.nativeFinishReason
+        item.cancelled = generation.cancelled
+        item.streamed = generation.streamed
+        item.isBYOK = generation.isBYOK
+        state.capturedGenerations[index] = item
     }
 
     @discardableResult
@@ -644,7 +861,7 @@ final class MonitorStore: ObservableObject {
         guard notificationAuthorizationGranted else { return false }
 
         let content = UNMutableNotificationContent()
-        content.title = "OpenRouter Monitor"
+        content.title = "RouterMeter"
         content.body = "Notifications are ready."
         content.sound = .default
         let request = UNNotificationRequest(
@@ -668,7 +885,7 @@ final class MonitorStore: ObservableObject {
         guard let notificationCenter else { return }
         await requestNotificationAuthorizationIfNeeded()
         let content = UNMutableNotificationContent()
-        content.title = "OpenRouter Monitor"
+        content.title = "RouterMeter"
         content.body = alert.notificationBody
         content.sound = .default
 
@@ -753,10 +970,15 @@ final class MonitorStore: ObservableObject {
     }
 
     private static func defaultStateURL() -> URL {
+        if let overridePath = ProcessInfo.processInfo.environment["ROUTERMETER_STATE_PATH"],
+           !overridePath.isEmpty {
+            return URL(fileURLWithPath: overridePath)
+        }
+
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? FileManager.default.homeDirectoryForCurrentUser
         return base
-            .appendingPathComponent("OpenRouterMonitor", isDirectory: true)
+            .appendingPathComponent("RouterMeter", isDirectory: true)
             .appendingPathComponent("state.json")
     }
 

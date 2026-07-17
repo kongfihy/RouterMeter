@@ -6,7 +6,7 @@ enum KeychainStoreError: Error {
 }
 
 struct KeychainStore {
-    private let service = "dev.openrouter.monitor"
+    private let service = "local.routermeter.openrouter"
     private let account = "openrouter-api-key"
 
     func saveAPIKey(_ apiKey: String) throws {

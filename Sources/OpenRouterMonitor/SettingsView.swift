@@ -23,6 +23,7 @@ struct SettingsView: View {
                 }
 
                 trackedModelsSection
+                generationLogsSection
 
                 HStack(alignment: .top, spacing: 16) {
                     budgetSection
@@ -289,6 +290,87 @@ struct SettingsView: View {
         }
     }
 
+    private var generationLogsSection: some View {
+        SettingsCard(title: "Request Logs", systemImage: "list.bullet.rectangle.portrait") {
+            VStack(alignment: .leading, spacing: 14) {
+                Toggle("Enable generation-level logs", isOn: $store.state.configuration.generationLogsEnabled)
+                    .disabled(!store.state.profile.isManagementKey)
+                    .onChange(of: store.state.configuration.generationLogsEnabled) { _, _ in store.save() }
+
+                Text("Uses OpenRouter Analytics to discover generation IDs. Request details are fetched only when you select a row; prompts and model responses are never downloaded.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                HStack(spacing: 24) {
+                    LabeledContent("Lookback") {
+                        Stepper(
+                            "\(store.state.configuration.generationLogLookbackHours) hours",
+                            value: $store.state.configuration.generationLogLookbackHours,
+                            in: 1...168
+                        )
+                        .frame(width: 190)
+                        .onChange(of: store.state.configuration.generationLogLookbackHours) { _, _ in store.save() }
+                    }
+
+                    LabeledContent("Maximum rows") {
+                        Picker("Maximum rows", selection: $store.state.configuration.generationLogLimit) {
+                            ForEach([25, 50, 100, 250, 500], id: \.self) { limit in
+                                Text(limit.formatted()).tag(limit)
+                            }
+                        }
+                        .labelsHidden()
+                        .frame(width: 100)
+                        .onChange(of: store.state.configuration.generationLogLimit) { _, _ in store.save() }
+                    }
+                }
+
+                HStack(spacing: 10) {
+                    Button {
+                        Task { await store.refreshGenerationLogs() }
+                    } label: {
+                        if store.isRefreshingGenerationLogs {
+                            Label("Refreshing", systemImage: "arrow.triangle.2.circlepath")
+                        } else {
+                            Label("Refresh Logs", systemImage: "arrow.clockwise")
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(
+                        !store.state.profile.isManagementKey
+                            || !store.state.configuration.generationLogsEnabled
+                            || store.isRefreshingGenerationLogs
+                    )
+
+                    Button("Clear Local Logs", systemImage: "trash", role: .destructive) {
+                        store.clearGenerationLogs()
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(store.state.capturedGenerations.isEmpty)
+
+                    Spacer()
+
+                    if let lastUpdatedAt = store.state.configuration.lastGenerationLogRefreshAt {
+                        Text("Updated \(lastUpdatedAt.formatted(date: .abbreviated, time: .shortened))")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                if !store.state.profile.isManagementKey {
+                    Label("A Management API key is required for request logs.", systemImage: "info.circle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else if let error = store.state.configuration.lastGenerationLogError {
+                    Label(error, systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption)
+                        .foregroundStyle(Brand.warning)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+    }
+
     private var budgetSection: some View {
         SettingsCard(title: "Budgets", systemImage: "gauge.with.dots.needle.bottom.50percent") {
             VStack(alignment: .leading, spacing: 12) {
@@ -540,8 +622,8 @@ struct SettingsView: View {
 
     private func exportData() {
         let panel = NSSavePanel()
-        panel.title = "Export OpenRouter Monitor Data"
-        panel.nameFieldStringValue = "openrouter-monitor-export.json"
+        panel.title = "Export RouterMeter Data"
+        panel.nameFieldStringValue = "routermeter-export.json"
         panel.allowedContentTypes = [.json]
         panel.canCreateDirectories = true
 

@@ -14,7 +14,7 @@ struct AppHeader: View {
                 HStack(spacing: 10) {
                     BrandIcon(size: 34)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("OpenRouter Monitor")
+                        Text("RouterMeter")
                             .font(.headline.weight(.semibold))
                         StatusPill(text: statusText, color: statusColor)
                     }
@@ -82,7 +82,7 @@ struct AppToolbar: View {
                 Button(role: .destructive) {
                     NSApplication.shared.terminate(nil)
                 } label: {
-                    Label("Quit OpenRouter Monitor", systemImage: "power")
+                    Label("Quit RouterMeter", systemImage: "power")
                 }
             } label: {
                 Image(systemName: "ellipsis")

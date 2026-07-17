@@ -3,7 +3,11 @@ import OpenRouterMonitorCore
 
 struct DashboardView: View {
     @EnvironmentObject private var store: MonitorStore
-    @State private var selectedSection: DashboardSection = .overview
+    @State private var selectedSection: DashboardSection
+
+    init(initialSection: DashboardSection = .overview) {
+        _selectedSection = State(initialValue: initialSection)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -30,6 +34,8 @@ struct DashboardView: View {
                             ModelsSection()
                         case .activity:
                             ActivitySection()
+                        case .logs:
+                            GenerationLogsView()
                         }
                     }
                     .padding(.horizontal, 20)
@@ -70,6 +76,7 @@ enum DashboardSection: String, CaseIterable, Identifiable {
     case overview
     case models
     case activity
+    case logs
 
     var id: String { rawValue }
 
@@ -78,6 +85,7 @@ enum DashboardSection: String, CaseIterable, Identifiable {
         case .overview: return "Overview"
         case .models: return "Models"
         case .activity: return "Activity"
+        case .logs: return "Logs"
         }
     }
 
@@ -86,6 +94,7 @@ enum DashboardSection: String, CaseIterable, Identifiable {
         case .overview: return "gauge.with.dots.needle.bottom.50percent"
         case .models: return "cube.transparent"
         case .activity: return "chart.xyaxis.line"
+        case .logs: return "list.bullet.rectangle.portrait"
         }
     }
 }
@@ -103,6 +112,7 @@ private struct OverviewSection: View {
 
             UsageMetricGrid(
                 snapshot: store.latestSnapshot,
+                localDayUsage: store.currentLocalDayUsage,
                 activitySummary: store.activityUsageSummary,
                 burnDownSummary: store.burnDownSummary,
                 budget: store.state.budget,

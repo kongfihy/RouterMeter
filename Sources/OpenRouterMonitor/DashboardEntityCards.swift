@@ -242,7 +242,7 @@ struct ModelUsageRow: View {
                     .monospacedDigit()
                     .frame(width: 64, alignment: .trailing)
 
-                Text(formatter.string(fromUSDCredits: model.usage))
+                Text(formatter.detailedUsageString(fromUSDCredits: model.usage))
                     .font(.caption.weight(.semibold))
                     .monospacedDigit()
                     .frame(width: 74, alignment: .trailing)

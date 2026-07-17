@@ -25,7 +25,8 @@ struct MenuBarLabelView: View {
         return MenuBarTitleBuilder.title(
             snapshot: store.latestSnapshot,
             mode: store.state.configuration.menuBarMode,
-            moneyFormatter: store.moneyFormatter
+            moneyFormatter: store.moneyFormatter,
+            todaySpendOverride: store.currentLocalDayUsage?.usage
         )
     }
 }

@@ -148,6 +148,7 @@ struct BalanceHeroCard: View {
 
 struct UsageMetricGrid: View {
     let snapshot: UsageSnapshot?
+    let localDayUsage: AnalyticsUsageSummary?
     let activitySummary: ActivityUsageSummary?
     let burnDownSummary: CreditBurnDownSummary?
     let budget: BudgetSettings
@@ -197,6 +198,9 @@ struct UsageMetricGrid: View {
     }
 
     private var todaySpend: Double? {
+        if let localDayUsage {
+            return localDayUsage.usage
+        }
         if let activitySummary {
             return activitySummary.latestDayUsage
         }
@@ -218,7 +222,7 @@ struct UsageMetricGrid: View {
     }
 
     private var todayRequests: Int? {
-        activitySummary?.trend.last?.requests
+        localDayUsage?.requestCount ?? activitySummary?.trend.last?.requests
     }
 
     private var sevenDayRequests: Int? {

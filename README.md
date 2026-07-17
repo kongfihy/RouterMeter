@@ -1,314 +1,162 @@
-# OpenRouter Monitor for macOS
+# RouterMeter for macOS
 
-OpenRouter Monitor is a native macOS menu bar app for keeping an eye on OpenRouter API spend without opening a browser dashboard.
+**把 OpenRouter 的余额、今日花费和每次调用，放进 Mac 菜单栏。**
 
-It is built for developers, AI power users, and small teams using OpenRouter for coding agents, prototypes, production apps, or personal AI workflows. The app shows your current usage at a glance, tracks budget thresholds, and surfaces model-level activity when your API key has access to OpenRouter management analytics. The interface uses native macOS controls and stable, opaque system surfaces so account data remains clear in both light and dark appearances.
+RouterMeter 是一款原生 macOS 菜单栏工具。它适合希望随时确认 OpenRouter 花费、余额和模型调用情况，又不想频繁打开网页控制台的人。
 
-![OpenRouter Monitor dashboard](monitor-1.png)
+<p align="center">
+  <img src="screenshots/overview.png" width="620" alt="RouterMeter Overview" />
+</p>
 
-## Features
+<p align="center">
+  <img src="screenshots/logs.png" width="620" alt="RouterMeter Request Logs" />
+</p>
 
-- macOS menu bar item with a compact usage readout.
-- Native SwiftUI popover dashboard.
-- Dedicated native Settings window with system-style controls.
-- OpenRouter API keys validated before being stored in Apple Keychain.
-- Local-only cache for non-secret settings and usage snapshots.
-- Immediate, manual, and scheduled refresh with setup, refreshing, connected, partial, stale, and offline states.
-- Key usage summary from OpenRouter.
-- Optional account credit balance for management-capable keys.
-- Optional model breakdown from OpenRouter activity analytics.
-- Interactive 30-day spend chart with dates, BYOK comparison, hover selection, token totals, and request totals.
-- Smart month-end spend forecasting with recent daily pace, monthly-budget projection, and unusual-spend alerts.
-- BYOK-inclusive usage totals and BYOK/OpenRouter usage split.
-- Credit burn-down estimate based on remaining credits and recent spend.
-- Per-key spend overview for management-capable keys.
-- Tracked model pricing view for comparing current OpenRouter input and output rates.
-- Searchable OpenRouter model catalog and one-click price tracking from model activity.
-- Tracked-model monitoring for price, context, scheduled expiry, and catalog availability changes.
-- API-key health monitoring for approaching expiry, near-limit keys, disabled-key counts, and reset cadence.
-- Optional launch-at-login setting.
-- USD and GBP display, with manual USD-to-GBP conversion.
-- Configurable notifications for budget thresholds and refresh failures, with a test action.
-- JSON export for local cached settings and usage data; API keys are never included.
-- Direct link to the OpenRouter dashboard.
+> 截图使用模拟数据，不包含真实账户信息。
 
-## Recent UI And UX Improvements
+## 为什么做 RouterMeter
 
-- Simplified the popover to three focused sections: **Overview**, **Models**, and **Activity**.
-- Moved configuration into a dedicated native Settings window.
-- Added compact native toolbar actions for refresh, Settings, OpenRouter activity, and quit.
-- Added immediate refresh when the app starts, plus clearer setup, refreshing, connected, partial, stale, and offline states.
-- Prevented an empty API-key field from replacing or deleting the stored key.
-- Added validation before Keychain storage, automatic analytics-access detection, and an explicit confirmed removal action.
-- Added persistent budget labels, currency units, and inline validation feedback.
-- Added searchable model discovery and one-click price tracking directly from model activity.
-- Added individual notification controls, refresh-failure deduplication, permission status, and a test-notification action.
-- Added individual controls for unusual spend pace, tracked-model changes, and key expiry or limit notifications.
-- Added JSON export for cached settings and usage snapshots without exporting API keys.
-- Replaced refractive Liquid Glass content cards with stable semantic macOS surfaces, removing reflected navigation, colour bleeding, and position-dependent tint changes.
-- Reduced panel borders and shadows and removed the coloured dashboard background wash for cleaner visual hierarchy.
+RouterMeter 基于开源项目 [OpenRouter Monitor](https://github.com/godsall-dev/openrouter-usage-menu-macos) 改造。原项目已经具备余额、预算、模型统计和趋势图等基础能力，但在日常使用中仍有几个不方便的地方：
 
-## What It Shows
+- “今日花费”主要来自当前 API Key，无法完整反映 Management Key 所看到的账户级支出。
+- 只能看到按模型汇总后的统计，无法查看最近一次调用具体用了什么模型、花了多少钱。
+- 菜单栏一次只能显示余额、百分比或今日费用，无法同时看到今日费用和剩余余额。
+- 金额固定保留两位小数，MiMo 等低成本调用容易显示成 `$0.00`。
+- 原应用的名称、Bundle ID、Keychain 和本地缓存与改造版本共用，不适合长期独立使用。
 
-The menu bar can show one of three display modes:
+RouterMeter 保留了原项目的监控能力，并把重点放在更直接的费用查看和调用记录上。
 
-- Remaining balance
-- Percent remaining
-- Today's spend
+## 主要改动
 
-The popover dashboard is divided into three sections.
+### 今日费用与余额
 
-### Overview
+- 按 Mac 本地自然日计算账户级今日费用。
+- 菜单栏可以同时显示“今日花费 · 剩余余额”。
+- 保留余额、剩余百分比和单独今日费用模式。
 
-- Current balance or key limit status
-- Today, week, month, and all-time usage when key-level data is available
-- Remaining-credit percentage and budget health
-- Projected month-end spend, current-month spend, recent daily pace, and expected budget variance
+### Request Logs
 
-### Models
+- 增加独立的 Logs 页面，默认展示最近 100 条调用。
+- 支持按最近时间、费用和 Token 数排序。
+- 支持搜索模型、服务商、状态和 Generation ID。
+- 展示模型、服务商、Prompt / Completion / Reasoning Token、费用、延迟、完成状态、流式请求和 BYOK 信息。
+- 只补充新增日志的详情，本地缓存已读取的数据，减少重复请求。
+- 不下载 Prompt 和模型回复正文。
 
-- Top model breakdown for recent activity when available
-- Request, token, cost, and usage-share summaries
-- One-click tracking for models seen in recent activity
-- Current input, output, and context pricing for user-tracked model IDs
-- Change history for tracked-model pricing, context length, expiry, and availability
+### 更适合小额调用的费用显示
 
-### Activity
-
-- Latest day, last 7 days, last 30 days, and request counts when activity data is available
-- Interactive 30-day spend trend with visible date labels and BYOK comparison
-- BYOK and OpenRouter spend split
-- Credit burn-down estimate when account credits and activity data are available
-- Key-health summary covering expiry, remaining limits, disabled keys, and reset cadence
-- Per-key spend, remaining limits, disabled status, and near-expiration labels when key list access is available
-
-Across the dashboard, the app also shows:
-
-- Connection and refresh status
-- Quick actions for refresh, OpenRouter activity, and settings
-
-The separate Settings window includes API-key management, startup behavior, refresh interval, menu-bar display, tracked models, model-change history, budgets, currency conversion, intelligence notification controls, key-expiry warning range, connection details, and JSON export.
-
-## API Access
-
-The app uses the following OpenRouter endpoints:
-
-- `GET /api/v1/key`
-  - Used for key-level usage.
-  - Works with a normal OpenRouter API key.
-
-- `GET /api/v1/credits`
-  - Used for account credit balance.
-  - Requires a management-capable key.
-
-- `GET /api/v1/activity`
-  - Used for model-level activity grouped by model/endpoint.
-  - Also powers the spend trend, BYOK split, request totals, token totals, and burn-down average.
-  - Requires a management-capable key.
-  - Covers recent activity returned by OpenRouter.
-
-- `GET /api/v1/keys?include_disabled=true`
-  - Used for the per-key spend overview.
-  - Requires a management-capable key.
-
-- `GET /api/v1/models`
-  - Used for current model pricing, context, expiry, and availability in the tracked pricing and Model Watch views.
-  - Works without a saved API key in the app.
-
-If a management-only endpoint returns `403 Forbidden`, the app still keeps the key-level refresh working and shows a warning for the unavailable account, activity, or key-list data.
-
-New keys are checked against OpenRouter before they are stored. The app also probes account-credit access to determine whether the key supports management analytics. A failed validation leaves the previously stored Keychain value unchanged.
-
-## Privacy And Storage
-
-The API key is stored only in Apple Keychain.
-
-Non-secret app data is stored locally at:
+金额会根据大小自动增加小数位，例如：
 
 ```text
-~/Library/Application Support/OpenRouterMonitor/state.json
+$12.50
+$0.0125
+$0.001943
 ```
 
-That file may contain:
+低成本模型不再因为四舍五入显示成零。
 
-- UI settings
-- Budget thresholds
-- Cached usage snapshots
-- Cached model activity returned by OpenRouter
-- Cached API key list metadata returned by OpenRouter
-- Tracked model IDs and cached pricing metadata returned by OpenRouter
-- Last refresh status and warnings
+### 独立的 macOS 应用身份
 
-The app does not send data to any service other than OpenRouter.
+- 应用名称：`RouterMeter`
+- Bundle ID：`local.routermeter.mac`
+- Keychain Service：`local.routermeter.openrouter`
+- 本地缓存：`~/Library/Application Support/RouterMeter/state.json`
 
-The Settings window can export the cached state as JSON. The export contains the same non-secret settings and usage data described above; the Keychain API key is never included.
+它可以作为独立应用安装，不会覆盖原版 OpenRouter Monitor 的设置和缓存。
 
-## Requirements
+## 功能概览
 
-- macOS 14 or newer
-- Swift toolchain with SwiftPM
-- An OpenRouter API key
-- A management-capable OpenRouter key for account balance and model activity
+- 菜单栏实时显示费用或余额
+- OpenRouter 账户余额和已用额度
+- 今日、近 7 天、近 30 天和本月费用
+- 按模型统计请求数、费用和 Token
+- Generation 级调用日志和请求详情
+- 30 天费用趋势和 BYOK 对比
+- 月末费用预测和预算提醒
+- API Key 健康状态与到期提醒
+- 模型价格、上下文长度和可用性跟踪
+- 自动刷新和登录时启动
+- USD / GBP 显示
+- 本地 JSON 数据导出
 
-## Build
+## 安装
+
+1. 在 [Releases](https://github.com/kongfihy/RouterMeter/releases) 下载最新的 `RouterMeter.dmg`。
+2. 打开 DMG，把 `RouterMeter.app` 拖入“应用程序”。
+3. 启动 RouterMeter，在 Settings 中保存 OpenRouter API Key。
+
+当前公开测试版使用本地签名，尚未经过 Apple Notarization。如果 macOS 阻止首次打开，可以在 Finder 中右键应用并选择“打开”。
+
+## API Key 权限
+
+普通 OpenRouter API Key 可以读取当前 Key 的基础使用数据。
+
+以下功能需要 **OpenRouter Management API Key**：
+
+- 账户总余额
+- 按本地自然日统计的账户级今日费用
+- API Key 列表和账户级分析
+- Generation 级 Request Logs
+
+RouterMeter 只调用 OpenRouter 的只读统计接口，不会使用你的 Key 发起模型推理。
+
+## 隐私
+
+- API Key 只保存在 Apple Keychain。
+- 本地状态文件不包含 API Key。
+- 日志浏览器只读取 Generation 元数据，不读取 Prompt 和回复正文。
+- RouterMeter 没有自己的服务器，也不上传统计数据。
+- 产品截图使用模拟账户数据。
+
+## 系统要求
+
+- macOS 14 或更高版本
+- Xcode Command Line Tools / Swift 6.1（仅源码构建需要）
+- OpenRouter API Key
+- Management API Key（账户余额和 Logs 需要）
+
+## 从源码构建
 
 ```bash
-swift build
-```
-
-## Run
-
-```bash
+git clone https://github.com/kongfihy/RouterMeter.git
+cd RouterMeter
 swift run OpenRouterMonitor
 ```
 
-When launched through SwiftPM, the app runs as a raw executable rather than a packaged `.app` bundle. Most functionality works, but macOS notifications are skipped in this mode because `UNUserNotificationCenter` requires a real app bundle.
-
-## Create a macOS App Bundle
-
-```bash
-./scripts/package_app.sh
-```
-
-The packaged app is created at:
-
-```text
-dist/OpenRouterMonitor.app
-```
-
-The local bundle is ad-hoc signed for development use. It is not notarized.
-
-## Create an Installer DMG
-
-```bash
-./scripts/package_dmg.sh
-```
-
-The DMG is created at:
-
-```text
-dist/OpenRouterMonitor.dmg
-```
-
-The DMG contains `OpenRouterMonitor.app` and an `Applications` shortcut for drag-to-install. The app inside the DMG is ad-hoc signed for local development, not notarized.
-
-You can verify the generated image and bundled app with:
-
-```bash
-hdiutil verify dist/OpenRouterMonitor.dmg
-codesign --verify --deep --strict --verbose=2 dist/OpenRouterMonitor.app
-```
-
-## Distribute a Release
-
-Do not commit the generated `.app` bundle or `.dmg` installer to the repository as normal tracked files. They are build artifacts and should stay out of git history.
-
-Recommended release flow:
-
-1. Build the installer:
-
-    ```bash
-    ./scripts/package_dmg.sh
-    ```
-
-2. Create and push a version tag:
-
-    ```bash
-    git tag v0.1.0
-    git push origin v0.1.0
-    ```
-
-3. Create a GitHub Release for that tag.
-4. Upload `dist/OpenRouterMonitor.dmg` as a release asset.
-
-This keeps the repository source-focused while giving users a clear downloadable installer from the Releases page.
-
-## Install From the DMG
-
-After creating the DMG:
-
-1. Open `dist/OpenRouterMonitor.dmg`.
-2. Drag `OpenRouterMonitor.app` into `Applications`.
-3. Launch it from Applications.
-
-Because the app is currently ad-hoc signed and not notarized, macOS may show a Gatekeeper warning on first launch outside this development machine.
-
-## Launch At Login
-
-Open the app's Settings window and enable **Launch OpenRouter Monitor at login** to start the menu bar app automatically when you sign in to macOS.
-
-This uses macOS Login Items through `SMAppService`. If macOS reports that approval is required, open System Settings and approve OpenRouter Monitor under Login Items. This setting should be tested from the packaged `.app` bundle, ideally after moving it to `/Applications`; it is not reliable when running the app as a raw SwiftPM executable with `swift run`.
-
-## Checks
-
-This project includes an executable check target:
+运行检查：
 
 ```bash
 swift run OpenRouterMonitorCoreChecks
 ```
 
-The checks cover:
+生成应用：
 
-- OpenRouter response decoding
-- Balance and percent calculations
-- USD/GBP display formatting
-- Menu bar title formatting
-- BYOK-inclusive usage totals
-- Alert threshold deduping
-- Mocked key-only refresh
-- Mocked management refresh
-- API key list decoding and fetching
-- Model pricing decoding and fetching
-- Activity decoding and model aggregation
-- Activity spend trend aggregation
-- Credit burn-down calculation
-- Month-end spend forecasting and week-over-week pace detection
-- Tracked-model price, context, expiry, and availability change detection
-- API-key expiry and near-limit health evaluation
-- HTTP error mapping
-- Malformed response handling
-- Transport failure handling
-
-## Project Structure
-
-```text
-Sources/
-  OpenRouterMonitor/
-    SwiftUI macOS app, menu bar UI, dashboard, settings, Keychain, local persistence
-
-  OpenRouterMonitorCore/
-    API models, OpenRouter client, refresh service, formatters, alert evaluation
-
-  OpenRouterMonitorCoreChecks/
-    Command-line verification target
+```bash
+./scripts/package_app.sh
 ```
 
-## Current Limitations
+生成 DMG：
 
-- The packaged app and DMG are ad-hoc signed, not notarized.
-- Notifications are disabled only when running through `swift run`; use the packaged `.app` for bundle-dependent macOS APIs.
-- GBP conversion uses a manual exchange rate.
-- Model breakdown depends on OpenRouter management activity access.
-- Spend trend, BYOK split, and burn-down widgets depend on OpenRouter activity access.
-- Smart forecasting and unusual-spend detection depend on OpenRouter activity access.
-- Per-key spend depends on OpenRouter key-list access.
-- Model Watch detects changes when the tracked-model catalog is refreshed; it does not poll continuously while the app is closed.
-- No multi-key or multi-account UI yet.
-- No local proxy/import mode for generation-level tracing yet.
+```bash
+./scripts/package_dmg.sh
+```
 
-## Roadmap
+生成结果默认位于 `dist/`，该目录不会提交到 Git。
 
-Planned next steps:
+## 当前限制
 
-- Add Developer ID signing and notarization.
-- Add a polished DMG background and layout.
-- Add multi-key profiles.
-- Add historical model analytics views.
-- Add automated light- and dark-appearance visual regression checks.
-- Add optional local proxy/import support for generation-level cost tracing.
+- Logs 依赖 OpenRouter Analytics 和 Generation 接口的可用性。
+- 为避免 Analytics 查询超时，应用先读取最多 500 条候选记录，再按 Generation 时间戳选出最近日志。
+- 首次加载 Logs 时需要补充 Generation 详情，之后会利用本地缓存减少请求。
+- 当前 DMG 尚未使用 Developer ID 签名和 Apple Notarization。
+- 暂不支持自动更新。
 
-## License
+## 上游项目与许可证
 
-OpenRouter Monitor is licensed under the GNU General Public License v3.0.
+RouterMeter 基于 [godsall-dev/openrouter-usage-menu-macos](https://github.com/godsall-dev/openrouter-usage-menu-macos) 开发，并保留了原项目的 Git 历史。
 
-See [LICENSE](LICENSE) for the full license text.
+主要新增内容包括账户级本地日费用、组合菜单栏显示、Generation 日志浏览、请求详情、增量日志缓存、小额费用精度和独立应用身份。
+
+RouterMeter 与上游项目均使用 **GNU General Public License v3.0**。详见 [LICENSE](LICENSE)。
+
+RouterMeter 是社区项目，与 OpenRouter 官方没有隶属关系。
