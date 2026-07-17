@@ -1,3 +1,7 @@
+<p align="center">
+  <strong>中文</strong> · <a href="README_EN.md">English</a>
+</p>
+
 # RouterMeter for macOS
 
 **把 OpenRouter 的余额、今日花费和每次调用，放进 Mac 菜单栏。**
@@ -11,7 +15,6 @@ RouterMeter 是一款原生 macOS 菜单栏工具。它适合希望随时确认 
 <p align="center">
   <img src="screenshots/logs.png" width="620" alt="RouterMeter Request Logs" />
 </p>
-
 
 ## 为什么做 RouterMeter
 
