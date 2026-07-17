@@ -12,7 +12,6 @@ RouterMeter 是一款原生 macOS 菜单栏工具。它适合希望随时确认 
   <img src="screenshots/logs.png" width="620" alt="RouterMeter Request Logs" />
 </p>
 
-> 截图使用模拟数据，不包含真实账户信息。
 
 ## 为什么做 RouterMeter
 
@@ -115,7 +114,6 @@ RouterMeter 只调用 OpenRouter 的只读统计接口，不会使用你的 Key 
 - 本地状态文件不包含 API Key。
 - 日志浏览器只读取 Generation 元数据，不读取 Prompt 和回复正文。
 - RouterMeter 没有自己的服务器，也不上传统计数据。
-- 产品截图使用模拟账户数据。
 
 ## 系统要求
 
