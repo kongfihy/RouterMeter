@@ -162,16 +162,120 @@ Local cache:      ~/Library/Application Support/RouterMeter/state.json
 3. Drag `RouterMeter.app` into the Applications folder.
 4. Launch RouterMeter and save your OpenRouter API key in Settings.
 
-### Gatekeeper notice
+### Gatekeeper and SIP
 
-Current beta builds are ad-hoc signed and are not notarized by Apple. On a Mac with Gatekeeper enabled, the first launch may require manual approval:
+Current beta builds are ad-hoc signed and are not signed with an Apple Developer ID or notarized. A Mac with Gatekeeper enabled may block the first launch.
 
-1. Try to open RouterMeter once.
+> [!IMPORTANT]
+> RouterMeter does not require SIP to be disabled. Prefer approving only RouterMeter or removing only its quarantine attribute. Disable Gatekeeper globally only if you understand the security impact.
+
+#### Option 1: Approve only RouterMeter — recommended
+
+1. Try to open `RouterMeter.app` once.
 2. Open **System Settings → Privacy & Security**.
-3. Find the blocked RouterMeter message.
-4. Select **Open Anyway** and confirm.
+3. Find the message saying RouterMeter was blocked.
+4. Select **Open Anyway**.
+5. Confirm with Touch ID or an administrator password.
 
-A future release can use Developer ID signing and Apple notarization to remove this extra first-launch step.
+This creates an exception for RouterMeter without weakening checks for other downloaded applications.
+
+#### Option 2: Remove only RouterMeter's quarantine attribute
+
+After confirming that the app came from this repository's official Release, run:
+
+```bash
+sudo xattr -dr com.apple.quarantine /Applications/RouterMeter.app
+open /Applications/RouterMeter.app
+```
+
+This does not disable Gatekeeper system-wide. Do not use this command on software from an untrusted source.
+
+#### Option 3: Disable Gatekeeper globally — not recommended
+
+Check the current status:
+
+```bash
+spctl --status
+```
+
+On newer macOS releases, run:
+
+```bash
+sudo spctl --global-disable
+```
+
+This reveals the **Anywhere** option under **System Settings → Privacy & Security**. Open Settings and manually select **Anywhere**.
+
+On macOS 14, use the following command if `--global-disable` is unavailable:
+
+```bash
+sudo spctl --master-disable
+```
+
+After RouterMeter launches successfully, re-enable Gatekeeper:
+
+```bash
+sudo spctl --global-enable
+```
+
+On macOS 14, use:
+
+```bash
+sudo spctl --master-enable
+```
+
+Then restore **App Store & Known Developers** under Privacy & Security.
+
+#### When SIP is enabled — recommended
+
+Check SIP with:
+
+```bash
+csrutil status
+```
+
+If the result is:
+
+```text
+System Integrity Protection status: enabled.
+```
+
+You can still use Open Anyway, remove RouterMeter's quarantine attribute, or change Gatekeeper settings. **You do not need to disable SIP to run RouterMeter.**
+
+#### When SIP is already disabled
+
+If the result is:
+
+```text
+System Integrity Protection status: disabled.
+```
+
+Use the same RouterMeter approval steps. SIP and Gatekeeper are separate security mechanisms, so disabling SIP does not automatically disable Gatekeeper.
+
+#### Enabling or disabling SIP
+
+> [!WARNING]
+> Disabling SIP reduces protection for the entire operating system. RouterMeter does not require this. These steps are included only for advanced system maintenance or for restoring SIP on a Mac where it is already disabled.
+
+On Apple Silicon, shut down the Mac, hold the power button until startup options appear, select **Options → Continue**, and open **Utilities → Terminal** in Recovery.
+
+On an Intel Mac, restart while holding `Command-R`, then open **Utilities → Terminal**.
+
+Disable SIP:
+
+```bash
+csrutil disable
+reboot
+```
+
+Re-enable SIP — recommended:
+
+```bash
+csrutil enable
+reboot
+```
+
+A future release can use Developer ID signing and Apple notarization to avoid these extra first-launch steps.
 
 ## 🖥️ System Requirements
 
@@ -269,11 +373,21 @@ Potential next steps include:
 - Expanded time-range filtering and exports
 - More detailed provider and model comparisons
 
-## 🌱 Upstream Project and License
+## 🌱 Upstream Project, Logs Implementation, and License
 
 RouterMeter is a modified version of [godsall-dev/openrouter-usage-menu-macos](https://github.com/godsall-dev/openrouter-usage-menu-macos) and preserves the upstream Git history.
 
 Major RouterMeter additions include account-level local-day spend, combined menu bar values, generation-level request logs, request-detail caching, adaptive small-cost precision, corrected calendar windows, native interface motion, and an independent application identity.
+
+### Logs implementation provenance
+
+The Logs feature does not include or copy a log browser from another open-source project and does not use a third-party Swift Package. It is implemented directly on top of RouterMeter's existing `OpenRouterClient` networking layer using OpenRouter endpoints for:
+
+- Analytics Metadata, which discovers available metrics and dimensions;
+- Analytics Query, which retrieves `generation_id`, cost, and request totals;
+- Generation details, which add model, provider, token, latency, and status metadata.
+
+The interface, local cache, sorting, incremental detail requests, and date parsing are implemented inside this repository. Other cost-monitoring tools were considered during early product research, but their source code, components, and assets are not included in RouterMeter. No additional third-party open-source license notice is currently required.
 
 RouterMeter and the upstream project are licensed under the **GNU General Public License v3.0**. See [LICENSE](LICENSE) for the full license text.
 

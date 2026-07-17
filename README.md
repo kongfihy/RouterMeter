@@ -90,13 +90,143 @@ $0.001943
 - USD / GBP 显示
 - 本地 JSON 数据导出
 
-## 安装
+## 安装与 Gatekeeper
 
 1. 在 [Releases](https://github.com/kongfihy/RouterMeter/releases) 下载最新的 `RouterMeter.dmg`。
 2. 打开 DMG，把 `RouterMeter.app` 拖入“应用程序”。
 3. 启动 RouterMeter，在 Settings 中保存 OpenRouter API Key。
 
-当前公开测试版使用本地签名，尚未经过 Apple Notarization。如果 macOS 阻止首次打开，可以在 Finder 中右键应用并选择“打开”。
+当前公开测试版使用 Ad-hoc 本地签名，尚未经过 Apple Developer ID 签名和 Notarization。开启 Gatekeeper 的 Mac 可能会在首次启动时阻止应用。
+
+> [!IMPORTANT]
+> RouterMeter 不需要关闭 SIP。优先使用“仍要打开”或仅移除 RouterMeter 的隔离标记。只有完全理解安全影响时，才考虑全局关闭 Gatekeeper。
+
+### 方案一：只允许 RouterMeter（推荐）
+
+1. 先正常打开一次 `RouterMeter.app`。
+2. 打开 **系统设置 → 隐私与安全性**。
+3. 在安全性区域找到 RouterMeter 被阻止的提示。
+4. 点击 **仍要打开 / Open Anyway**。
+5. 使用 Touch ID 或管理员密码确认。
+
+这是影响范围最小的方式，不会降低其他下载软件的安全检查。
+
+### 方案二：在终端中只移除 RouterMeter 的隔离标记
+
+确认应用来自本仓库的正式 Release 后，执行：
+
+```bash
+sudo xattr -dr com.apple.quarantine /Applications/RouterMeter.app
+open /Applications/RouterMeter.app
+```
+
+这只处理 RouterMeter，不会关闭整个系统的 Gatekeeper。不要对来源不明的应用执行这条命令。
+
+### 方案三：全局关闭 Gatekeeper（不推荐）
+
+先检查状态：
+
+```bash
+spctl --status
+```
+
+在较新的 macOS 上：
+
+```bash
+sudo spctl --global-disable
+```
+
+该命令会在 **系统设置 → 隐私与安全性** 中显示“允许从任何来源下载的应用”选项。进入设置并手动选择 **任何来源 / Anywhere**。
+
+在 macOS 14 上，如果 `--global-disable` 不可用，可以使用：
+
+```bash
+sudo spctl --master-disable
+```
+
+安装并成功启动 RouterMeter 后，建议立即重新开启 Gatekeeper：
+
+```bash
+sudo spctl --global-enable
+```
+
+macOS 14 可以使用：
+
+```bash
+sudo spctl --master-enable
+```
+
+然后在 **系统设置 → 隐私与安全性** 中恢复为 **App Store 与被认可的开发者**。
+
+### SIP 开启时
+
+使用下面的命令检查 SIP：
+
+```bash
+csrutil status
+```
+
+如果显示：
+
+```text
+System Integrity Protection status: enabled.
+```
+
+这是推荐状态。SIP 开启时仍然可以使用：
+
+- “隐私与安全性 → 仍要打开”；
+- `xattr` 只移除 RouterMeter 的隔离标记；
+- Gatekeeper 的系统设置。
+
+**不需要为了运行 RouterMeter 关闭 SIP。**
+
+### SIP 已关闭时
+
+如果显示：
+
+```text
+System Integrity Protection status: disabled.
+```
+
+操作方式与 SIP 开启时相同。SIP 和 Gatekeeper 是两套不同的安全机制，关闭 SIP 不会自动关闭 Gatekeeper。
+
+如果 RouterMeter 仍被阻止，请依次使用：
+
+1. “隐私与安全性 → 仍要打开”；
+2. 移除 RouterMeter 的隔离标记；
+3. 最后才考虑全局关闭 Gatekeeper。
+
+### 如何开启或关闭 SIP
+
+> [!WARNING]
+> 关闭 SIP 会降低整个系统的保护能力。RouterMeter 本身不需要这项操作，下面的步骤只用于高级系统维护或恢复已经被关闭的 SIP。
+
+Apple Silicon Mac：
+
+1. 关机。
+2. 按住电源键，直到出现“正在载入启动选项”。
+3. 选择 **选项 → 继续**。
+4. 在恢复模式菜单中打开 **实用工具 → 终端**。
+
+Intel Mac：
+
+1. 重新启动 Mac。
+2. 启动时按住 `Command-R` 进入恢复模式。
+3. 打开 **实用工具 → 终端**。
+
+关闭 SIP：
+
+```bash
+csrutil disable
+reboot
+```
+
+重新开启 SIP（推荐）：
+
+```bash
+csrutil enable
+reboot
+```
 
 ## API Key 权限
 
@@ -161,11 +291,21 @@ swift run OpenRouterMonitorCoreChecks
 - 当前 DMG 尚未使用 Developer ID 签名和 Apple Notarization。
 - 暂不支持自动更新。
 
-## 上游项目与许可证
+## 上游项目、Logs 实现与许可证
 
 RouterMeter 基于 [godsall-dev/openrouter-usage-menu-macos](https://github.com/godsall-dev/openrouter-usage-menu-macos) 开发，并保留了原项目的 Git 历史。
 
 主要新增内容包括账户级本地日费用、组合菜单栏显示、Generation 日志浏览、请求详情、增量日志缓存、小额费用精度、日期统计修正、原生交互动效和独立应用身份。
+
+### Logs 接口实现来源
+
+Logs 功能没有引入或复制其他开源项目的日志浏览器，也没有使用第三方 Swift Package。它是在 RouterMeter 现有 `OpenRouterClient` 网络层上直接实现的，使用 OpenRouter 提供的接口：
+
+- Analytics Metadata：读取当前账户可用的指标与维度；
+- Analytics Query：查询 `generation_id`、费用和请求数；
+- Generation：按 Generation ID 补充模型、服务商、Token、延迟和状态详情。
+
+界面、缓存、排序、增量详情请求和日期解析均在 RouterMeter 仓库中实现。早期调研过其他费用监控工具的产品形态，但当前代码库中没有包含它们的源码、组件或资源，因此不需要增加额外的第三方开源许可证声明。
 
 RouterMeter 与上游项目均使用 **GNU General Public License v3.0**。详见 [LICENSE](LICENSE)。
 
